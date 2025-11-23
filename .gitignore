@@ -176,3 +176,6 @@ cython_debug/
 
 # Aggiunta per ignorare file temporanei dei notebook
 dataset/animal-shelter-intakes-and-outcomes.csv
+dataset/rifugi_locations.csv
+dataset/animali-rifugi.csv
+dataset/animali-rifugi-clean.csv

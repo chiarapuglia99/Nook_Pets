@@ -2,9 +2,9 @@ import pandas as pd
 import numpy as np
 
 # Percorsi dei file (corretti per esecuzione dalla root del progetto)
-intakes_path = 'dataset/animal-shelter-intakes-and-outcomes.csv'
-rifugi_path = 'dataset/rifugi_locations.csv'
-output_path = 'dataset/animali-rifugi.csv'
+intakes_path = '../dataset/animal-shelter-intakes-and-outcomes.csv'
+rifugi_path = '../dataset/rifugi_locations.csv'
+output_path = '../dataset/animali-rifugi.csv'
 
 # Carica i dati
 intakes = pd.read_csv(intakes_path)

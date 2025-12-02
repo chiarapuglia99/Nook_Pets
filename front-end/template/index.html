@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nook Pets - Trova Rifugio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <main class="container">
+    <nav class="topbar">
+      <div class="brand">
+        <svg class="paw" width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+          <path d="M4.5 10.5c0 1.38-1.12 2.5-2.5 2.5S-.5 11.88-.5 10.5 0.62 8 2 8s2.5 1.12 2.5 2.5z" fill="#FFB703" transform="translate(4 2)"/>
+          <path d="M13.5 5.5c0 1.93-1.57 3.5-3.5 3.5S6.5 7.43 6.5 5.5 8.07 2 10 2s3.5 1.57 3.5 3.5z" fill="#FFB703" transform="translate(4 2)"/>
+          <path d="M18 11.2c0 2.3-1.8 4.2-4 4.2s-4-1.9-4-4.2 1.8-4.2 4-4.2 4 1.9 4 4.2z" fill="#FFB703" transform="translate(0 4)"/>
+        </svg>
+        <span class="brand-text">Nook Pets</span>
+      </div>
+      <div class="top-actions">Cerca rifugi vicini</div>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-content">
+        <h1>Trova il rifugio per animali più vicino a te</h1>
+        <p class="lead">Inserisci un indirizzo e ti mostriamo il rifugio più vicino, la distanza e come arrivarci — rapido e semplice.</p>
+        <div class="hero-illustration" aria-hidden>
+          <!-- decorative paw background via CSS -->
+        </div>
+      </div>
+
+      <form id="search-form" class="search-card">
+        <label for="indirizzo" class="sr-only">Indirizzo</label>
+        <input id="indirizzo" name="indirizzo" type="text" placeholder="Es. 4000 E Anaheim St, Long Beach" aria-label="Indirizzo">
+        <button id="btn-submit" type="submit">Cerca</button>
+      </form>
+    </header>
+
+    <section id="feedback" class="feedback" aria-live="polite"></section>
+
+    <section id="result" class="result hidden">
+      <h2>Rifugio più vicino</h2>
+      <div class="card result-card">
+        <div class="result-media">
+          <img id="animal-img" src="" alt="Immagine animale" />
+        </div>
+        <div class="result-body">
+          <p id="nome" class="bold"></p>
+          <p id="indirizzo-rifugio"></p>
+          <p id="distanza"></p>
+          <a id="directions-link" class="directions hidden" target="_blank" rel="noopener">Apri indicazioni</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="map" class="map" aria-label="Mappa" ></section>
+
+    <footer class="footer">
+      <p>Creato con ❤️ per gli animali — immagini a scopo illustrativo</p>
+    </footer>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="/app.js"></script>
+</body>
+</html>

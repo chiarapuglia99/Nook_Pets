@@ -55,12 +55,14 @@ if index_file is None and STATIC_ROOT.exists():
     # index may be directly under STATIC_ROOT but missing; set index_file None and let 404 surface
     pass
 
-FRONTEND_DIR = str(STATIC_ROOT)
+# IMPORTANT: only set FRONTEND_DIR if the folder exists. On Windows passing a non-existent
+# static_folder to Flask can cause confusing lookup behavior for routes starting with '/'.
+FRONTEND_DIR = str(STATIC_ROOT) if STATIC_ROOT.exists() else None
 INDEX_REL_PATH = None
 INDEX_PARENT = None
-if index_file is not None:
+if index_file is not None and FRONTEND_DIR:
     try:
-        INDEX_REL_PATH = str(index_file.relative_to(STATIC_ROOT))
+        INDEX_REL_PATH = str(index_file.relative_to(Path(FRONTEND_DIR)))
     except Exception:
         INDEX_REL_PATH = str(index_file.name)
     INDEX_PARENT = str(index_file.parent)
@@ -69,8 +71,41 @@ print(f"[server] Static root: {FRONTEND_DIR}")
 print(f"[server] Index file resolved: {index_file}")
 
 # Creazione dell'app Flask e abilitazione di CORS per permettere richieste cross-origin
-app = Flask(__name__, static_folder=FRONTEND_DIR, static_url_path='')
+app = Flask(__name__, static_folder=FRONTEND_DIR if FRONTEND_DIR else None, static_url_path='')
 CORS(app)
+
+# Helper sicuro per inviare file dalla directory front-end in modo cross-platform
+def safe_send_from_directory(base_dir: str, filename: str):
+    """
+    Serve un file da base_dir in modo sicuro e cross-platform.
+    - base_dir: stringa della cartella base (deve esistere)
+    - filename: nome file o percorso relativo come ricevuto dalla route (può iniziare con '/');
+      la funzione normalizza rimuovendo eventuali slash iniziali.
+    Restituisce l'oggetto di Flask send_from_directory se il file esiste e si trova dentro base_dir,
+    altrimenti None.
+    """
+    if not base_dir:
+        return None
+    # Normalizza filename rimuovendo leading slashes o backslashes che su Windows possono creare path assoluti
+    # e rimuovendo eventuali .. componenti con normpath
+    # Usare lstrip sui separatori per evitare che Flask interpreti il filename come assoluto
+    filename_normalized = filename.lstrip('/\\')
+    # Ulteriore normalizzazione
+    filename_normalized = os.path.normpath(filename_normalized)
+
+    base = Path(base_dir)
+    target = base / filename_normalized
+    try:
+        base_res = base.resolve()
+        target_res = target.resolve()
+        # Verifica che target sia dentro base (prevenire path traversal)
+        target_res.relative_to(base_res)
+    except Exception:
+        return None
+    if not target_res.exists():
+        return None
+    rel = str(target_res.relative_to(base_res))
+    return send_from_directory(str(base_res), rel)
 
 # Carichiamo il DB dei rifugi all'avvio
 try:
@@ -91,23 +126,30 @@ except Exception as e:
 # Serve index.html dalla posizione trovata (se non trovata, lascia che Flask serva il file index.html nel static root)
 @app.route('/')
 def index():
-    if INDEX_REL_PATH:
-        return send_from_directory(FRONTEND_DIR, INDEX_REL_PATH)
-    else:
-        # fallback: serve index.html dalla static folder direttamente
+    # Use safe helper to avoid issues with leading slash on Windows
+    if INDEX_REL_PATH and FRONTEND_DIR:
+        res = safe_send_from_directory(FRONTEND_DIR, INDEX_REL_PATH)
+        if res:
+            return res
+    try:
         return app.send_static_file('index.html')
+    except Exception:
+        return ('', 404)
 
 # Route helper: prova a servire file statici prima dalla static root, poi dalla index parent (se diverso)
 def try_send_static(filename):
+    # strip leading slash/backslash to make it relative
+    fn = filename.lstrip('/\\')
     # Attempt 1: from static root
-    static_path = Path(FRONTEND_DIR) / filename
-    if static_path.exists():
-        return send_from_directory(FRONTEND_DIR, filename)
+    if FRONTEND_DIR:
+        res = safe_send_from_directory(FRONTEND_DIR, fn)
+        if res:
+            return res
     # Attempt 2: from index parent (es. front-end/template)
     if INDEX_PARENT:
-        alt_path = Path(INDEX_PARENT) / filename
-        if alt_path.exists():
-            return send_from_directory(INDEX_PARENT, filename)
+        res = safe_send_from_directory(INDEX_PARENT, fn)
+        if res:
+            return res
     return None
 
 # Se index.html fa riferimento a /app.js ma il file è sotto una sottocartella, servilo correttamente
@@ -116,47 +158,49 @@ def app_js():
     res = try_send_static('app.js')
     if res:
         return res
-    # some projects put app.js under 'template' folder
-    if INDEX_PARENT:
-        if (Path(INDEX_PARENT) / 'app.js').exists():
-            return send_from_directory(INDEX_PARENT, 'app.js')
     return ('', 404)
 
 # Specific routes for common asset folders (css, js, assets) to handle cases where index.html
 # resides in a subfolder but assets are located in sibling directories like ../css or ../assets
 @app.route('/css/<path:filename>')
 def css_file(filename):
+    res = None
     # prefer STATIC_ROOT/css
-    css_path = Path(FRONTEND_DIR) / 'css' / filename
-    if css_path.exists():
-        return send_from_directory(Path(FRONTEND_DIR) / 'css', filename)
+    if FRONTEND_DIR:
+        res = safe_send_from_directory(os.path.join(FRONTEND_DIR, 'css'), filename)
+        if res:
+            return res
     # fallback: try index parent /css
     if INDEX_PARENT:
-        alt = Path(INDEX_PARENT) / 'css' / filename
-        if alt.exists():
-            return send_from_directory(Path(INDEX_PARENT) / 'css', filename)
+        res = safe_send_from_directory(os.path.join(INDEX_PARENT, 'css'), filename)
+        if res:
+            return res
     return ('', 404)
 
 @app.route('/js/<path:filename>')
 def js_file(filename):
-    js_path = Path(FRONTEND_DIR) / 'js' / filename
-    if js_path.exists():
-        return send_from_directory(Path(FRONTEND_DIR) / 'js', filename)
+    res = None
+    if FRONTEND_DIR:
+        res = safe_send_from_directory(os.path.join(FRONTEND_DIR, 'js'), filename)
+        if res:
+            return res
     if INDEX_PARENT:
-        alt = Path(INDEX_PARENT) / 'js' / filename
-        if alt.exists():
-            return send_from_directory(Path(INDEX_PARENT) / 'js', filename)
+        res = safe_send_from_directory(os.path.join(INDEX_PARENT, 'js'), filename)
+        if res:
+            return res
     return ('', 404)
 
 @app.route('/assets/<path:filename>')
 def assets_file(filename):
-    a_path = Path(FRONTEND_DIR) / 'assets' / filename
-    if a_path.exists():
-        return send_from_directory(Path(FRONTEND_DIR) / 'assets', filename)
+    res = None
+    if FRONTEND_DIR:
+        res = safe_send_from_directory(os.path.join(FRONTEND_DIR, 'assets'), filename)
+        if res:
+            return res
     if INDEX_PARENT:
-        alt = Path(INDEX_PARENT) / 'assets' / filename
-        if alt.exists():
-            return send_from_directory(Path(INDEX_PARENT) / 'assets', filename)
+        res = safe_send_from_directory(os.path.join(INDEX_PARENT, 'assets'), filename)
+        if res:
+            return res
     return ('', 404)
 
 # Aggiungiamo un catch-all per file statici non trovati che prova l'altra cartella

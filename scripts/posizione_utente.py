@@ -28,8 +28,8 @@ def load_rifugi_db(path: Optional[str] = None) -> pd.DataFrame:
     """
     Funzione per caricare il database dei rifugi da un file CSV.
     Se non viene fornito un percorso, viene caricato il file di default nella cartella 'dataset'.
-    @param path: Percorso opzionale del file CSV
-    @return: DataFrame pandas con i dati dei rifugi
+    @:param path: Percorso opzionale del file CSV
+    @:return: DataFrame pandas con i dati dei rifugi
     """
 
     global rifugi_db
@@ -54,7 +54,7 @@ def get_geolocator() -> Nominatim:
     """
     Restituisce l'istanza condivisa di Nominatim per il geocoding. Serve a evitare di creare
     più istanze in memoria ad ogni chiamata della funzione di geocoding.
-    @return: Istanza di Nominatim
+    @:return: Istanza di Nominatim
     """
     global _geolocator
     # Se non esiste, la crea assegnando un user_agent unico.
@@ -74,11 +74,11 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     Haversine è una funzione che calcola la distanza tra due punti sulla superficie terrestre
     dati la latitudine e la longitudine di entrambi i punti.
     In output sarà restituita la distanza in chilometri.
-    @param lat1: Latitudine del punto 1
-    @param lon1: Longitudine del punto 1
-    @param lat2: Latitudine del punto 2
-    @param lon2: Longitudine del punto 2
-    @return: Distanza in chilometri tra i due punti
+    @:param lat1: Latitudine del punto 1
+    @:param lon1: Longitudine del punto 1
+    @:param lat2: Latitudine del punto 2
+    @:param lon2: Longitudine del punto 2
+    @:return: Distanza in chilometri tra i due punti
     """
 
     # Raggio della Terra in km
@@ -105,9 +105,9 @@ def calcola_coordinate(indirizzo_input: str, geolocator: Optional[Nominatim] = N
     L'input è fornito dall'utente tramite l'interfaccia web, ed essendo quest'ultimo poco
     esperto, l'indirizzo potrebbe essere incompleto o ambiguo. La funzione tenta di gestire questi casi
     perfezionando l'input prima di inviarlo al servizio di geocoding.
-    @param indirizzo_input: Indirizzo testuale fornito dall'utente
-    @param geolocator: opzionale geolocator (utile per i test)
-    @return: Tuple (latitudine, longitudine) o (None, None) se non trovato
+    @:param indirizzo_input: Indirizzo testuale fornito dall'utente
+    @:param geolocator: opzionale geolocator (utile per i test)
+    @:return: Tuple (latitudine, longitudine) o (None, None) se non trovato
     """
 
     if geolocator is None:
@@ -160,18 +160,23 @@ def trova_rifugio_piu_vicino(indirizzo_utente: str, rifugi_df: Optional[pd.DataF
     3. Restituisce il rifugio migliore.
 
     Accetta opzionalmente un DataFrame dei rifugi (utile per test e per evitare variabili globali).
+    @:param indirizzo_utente: Indirizzo testuale fornito dall'utente
+    @:param rifugi_df: Opzionale DataFrame dei rifugi
+    @:param geolocator: Opzionale geolocator (utile per i test
+    @:return: Dizionario con i dati del rifugio più vicino o messaggio di errore
     """
 
-    # Passo A: Ottenere coordinate utente
+    # Cordinate geografiche dell'utente
     lat_utente, lon_utente = calcola_coordinate(indirizzo_utente, geolocator=geolocator)
 
+    # Se non trovate, restituisce un messaggio di errore
     if lat_utente is None:
         return {
             "successo": False,
             "messaggio": "Indirizzo non trovato. Prova ad inserire anche la Città o il CAP."
         }
 
-    # Passo B: Trovare il DataFrame da usare
+    # Ricerca del DataFrame da usare per il calcolo, se non fornito usa la variabile globale rifugi_db
     if rifugi_df is None:
         if rifugi_db is None:
             raise ValueError("Database dei rifugi non caricato. Chiama load_rifugi_db() prima di usare questa funzione.")
@@ -181,28 +186,29 @@ def trova_rifugio_piu_vicino(indirizzo_utente: str, rifugi_df: Optional[pd.DataF
 
     print(f"📍 Posizione Utente identificata: {lat_utente}, {lon_utente}")
 
-    # Assicuriamoci che le colonne esistano
+    # Check per assicurarsi che le colonne necessarie siano presenti
     required_cols = {"Latitude", "Longitude", "Shelter_Name", "Address", "City"}
     if not required_cols.issubset(set(df_calcolo.columns)):
         missing = required_cols - set(df_calcolo.columns)
         raise KeyError(f"Colonne mancanti nel dataset dei rifugi: {missing}")
 
-    # Passo B: Calcolo distanze su tutto il database
+    # Calcolo delle distanze tra l'utente e tutti i rifugi
     df_calcolo['distanza_km'] = haversine_distance(
         lat_utente, lon_utente,
         df_calcolo['Latitude'], df_calcolo['Longitude']
     )
 
-    # Passo C: Trovare il minimo e formattare la risposta
+    # Trovare il rifugio più vicino, ordinando per distanza
     rifugio_top = df_calcolo.sort_values('distanza_km').iloc[0]
 
-    # Convertiamo i valori numpy a tipi Python nativi per la serializzazione JSON
+    # Conversione dei dati in tipi nativi Python per l'output
     lat_rif = float(rifugio_top['Latitude'])
     lon_rif = float(rifugio_top['Longitude'])
     lat_u = float(lat_utente)
     lon_u = float(lon_utente)
     distanza = float(round(rifugio_top['distanza_km'], 2))
 
+    # Costruzione del dizionario di risultato, che sarà restituito all'interfaccia utente in formato JSON
     risultato = {
         "successo": True,
         "dati_rifugio": {
@@ -226,13 +232,14 @@ if __name__ == "__main__":
 
     try:
         # Caricamento del database dei rifugi, in caso di errore
-        # viene stampato in console il messaggio
+        # viene stampato in console il messaggio di errore.
         load_rifugi_db()
         print("Database rifugi caricato correttamente.")
     except Exception as e:
         print(f"Errore caricamento database rifugi: {e}")
 
-    # In questo caso di esempio, l'input utente è un indirizzo incompleto
+    # In questo caso, l'input utente è hardcodato per scopi di test.
+    # In un'applicazione reale, questo verrebbe fornito tramite l'interfaccia web.
     input_utente = "4000 E Anaheim St"
 
     risposta = trova_rifugio_piu_vicino(input_utente)

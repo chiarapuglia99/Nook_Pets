@@ -1,12 +1,22 @@
+"""
+Il seguente snippet di codice implementa un server web Flask che fornisce
+un'API per trovare il rifugio più vicino dato un indirizzo. Il server gestisce
+anche i file statici presenti nella cartella front-end, con rilevamento dinamico
+della posizione di index.html. Supporta CORS, permettendo richieste cross-origin dalla UI front-end.
+Inoltre, include un endpoint API per suggerimenti di strade (autocomplete) e
+geocodifica on-demand con caching in memoria.
+"""
 from pathlib import Path
 import sys
 import os
 
-# Assicuriamoci che la root del progetto sia nel sys.path così che `import scripts.*` funzioni
+# Aggiunta della cartella principale del progetto al sys.path per importazioni locali
+# Gestione del cross-platform, in quanto su Windows il path separator è diverso rispetto a Unix/Mac.
 BASE_DIR = Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+# Importazione delle dipendenze Flask e CORS, con gestione degli errori se mancanti
 try:
     from flask import Flask, request, jsonify, send_from_directory
     from flask_cors import CORS
@@ -18,12 +28,19 @@ from scripts.posizione_utente import trova_rifugio_piu_vicino, load_rifugi_db, g
 # =====================================
 # Rilevamento dinamico della cartella front-end
 # =====================================
-# Procedura:
-# 1. Consideriamo come static root BASE_DIR/'front-end' (se esiste).
-# 2. Cerchiamo il file index.html all'interno di quella cartella o sue sottocartelle.
-# 3. Se index.html si trova in una sottocartella (es. front-end/template/index.html), serviamo
-#    l'index da lì ma manteniamo lo static_folder come front-end root in modo che /css/... funzioni.
+# La procedura è la seguente:
+#   1. Consideriamo come static root BASE_DIR/'front-end', se esiste. Altrimenti, fallback a
+#      BASE_DIR/'frontend' o BASE_DIR/'front_end' (legacy).
+#   2. Cerchiamo index.html sotto static root (ricerca ricorsiva), se trovato lo usiamo.
+#   3. Se non trovato, cerchiamo index.html in BASE_DIR/'front-end', 'frontend', 'front_end' (legacy),
+#      in ordine, con ricerca ricorsiva. Se trovato, usiamo quello e impostiamo static root a quella cartella.
+#   4. Se ancora non trovato, lasciamo static root come al punto 1 (potrebbe non esistere).
+#   5. Impostiamo FRONTEND_DIR a static root se esiste, altrimenti None.
+#   6. Impostiamo INDEX_REL_PATH come percorso relativo di index.html rispetto a FRONTEND_DIR, se trovato.
+#   7. Impostiamo INDEX_PARENT come la cartella padre di index.html, se trovato.
+# =====================================
 
+# Step 1: determiniamo lo STATIC_ROOT
 STATIC_ROOT = BASE_DIR / 'front-end'
 if not STATIC_ROOT.exists():
     # fallback a frontend o front_end
@@ -32,14 +49,14 @@ if not STATIC_ROOT.exists():
     elif (BASE_DIR / 'front_end').exists():
         STATIC_ROOT = BASE_DIR / 'front_end'
 
-# Trova index.html sotto STATIC_ROOT
+# Step 2: cerchiamo index.html sotto STATIC_ROOT
 index_file = None
 if STATIC_ROOT.exists():
     matches = list(STATIC_ROOT.rglob('index.html'))
     if matches:
         index_file = matches[0]
 
-# Se non abbiamo trovato index, tentiamo di trovare in candidate dirs (legacy)
+# Step 3: se non trovato, cerchiamo in altre cartelle candidate
 if index_file is None:
     for cand in [BASE_DIR / 'front-end', BASE_DIR / 'frontend', BASE_DIR / 'front_end']:
         if cand.exists():
@@ -50,13 +67,13 @@ if index_file is None:
                 STATIC_ROOT = cand
                 break
 
-# se ancora nulla, fallback al STATIC_ROOT (potrebbe non esistere)
+# Se ancora non trovato, lasciamo STATIC_ROOT com'è (potrebbe non esistere)
 if index_file is None and STATIC_ROOT.exists():
     # index may be directly under STATIC_ROOT but missing; set index_file None and let 404 surface
     pass
 
-# IMPORTANT: only set FRONTEND_DIR if the folder exists. On Windows passing a non-existent
-# static_folder to Flask can cause confusing lookup behavior for routes starting with '/'.
+# Su windows, assicurarsi che i path siano corretti
+# altrimenti Flask potrebbe non trovare i file statici e dare errore.
 FRONTEND_DIR = str(STATIC_ROOT) if STATIC_ROOT.exists() else None
 INDEX_REL_PATH = None
 INDEX_PARENT = None
@@ -67,28 +84,30 @@ if index_file is not None and FRONTEND_DIR:
         INDEX_REL_PATH = str(index_file.name)
     INDEX_PARENT = str(index_file.parent)
 
-print(f"[server] Static root: {FRONTEND_DIR}")
-print(f"[server] Index file resolved: {index_file}")
 
-# Creazione dell'app Flask e abilitazione di CORS per permettere richieste cross-origin
+# Creazione dell'app Flask con supporto CORS
 app = Flask(__name__, static_folder=FRONTEND_DIR if FRONTEND_DIR else None, static_url_path='')
+# Abilita CORS per tutte le route, permettendo richieste cross-origin dalla UI front-end
 CORS(app)
 
-# Helper sicuro per inviare file dalla directory front-end in modo cross-platform
+# Funzione helper per servire file in modo sicuro da una directory specificata
 def safe_send_from_directory(base_dir: str, filename: str):
     """
-    Serve un file da base_dir in modo sicuro e cross-platform.
-    - base_dir: stringa della cartella base (deve esistere)
-    - filename: nome file o percorso relativo come ricevuto dalla route (può iniziare con '/');
-      la funzione normalizza rimuovendo eventuali slash iniziali.
-    Restituisce l'oggetto di Flask send_from_directory se il file esiste e si trova dentro base_dir,
-    altrimenti None.
+    Serve un file da una directory specificata in modo sicuro, prevenendo path traversal.
+    Ritorna None se il file non esiste o se la richiesta è potenzialmente pericolosa.
+    1. Rimuove leading slashes/backslashes dal filename per evitare path assoluti.
+    2. Normalizza il filename con os.path.normpath per rimuovere componenti pericolose come ..
+    3. Risolve i path assoluti di base_dir e del target file.
+    4. Verifica che il target risolto sia dentro base_dir risolto.
+    5. Se il file esiste, lo serve; altrimenti ritorna None.
+    @:param base_dir: La directory base da cui servire i file.
+    @:param filename: Il nome del file richiesto (relativo a base_dir).
+    @:return: La risposta di send_from_directory o None se non trovato/sicuro
     """
     if not base_dir:
         return None
-    # Normalizza filename rimuovendo leading slashes o backslashes che su Windows possono creare path assoluti
-    # e rimuovendo eventuali .. componenti con normpath
-    # Usare lstrip sui separatori per evitare che Flask interpreti il filename come assoluto
+
+    # Rimuove leading slashes/backslashes per rendere il path relativo (soprattutto per Windows)
     filename_normalized = filename.lstrip('/\\')
     # Ulteriore normalizzazione
     filename_normalized = os.path.normpath(filename_normalized)
@@ -98,7 +117,7 @@ def safe_send_from_directory(base_dir: str, filename: str):
     try:
         base_res = base.resolve()
         target_res = target.resolve()
-        # Verifica che target sia dentro base (prevenire path traversal)
+        # Verifica che target sia dentro base
         target_res.relative_to(base_res)
     except Exception:
         return None
@@ -107,14 +126,14 @@ def safe_send_from_directory(base_dir: str, filename: str):
     rel = str(target_res.relative_to(base_res))
     return send_from_directory(str(base_res), rel)
 
-# Carichiamo il DB dei rifugi all'avvio
+# Caricamento del database dei rifugi in memoria
 try:
     load_rifugi_db()
     print("Database rifugi caricato in memoria.")
 except Exception as e:
     print(f"Attenzione: impossibile caricare il database dei rifugi: {e}")
 
-# Carichiamo lista strade per suggerimenti (autocomplete)
+# Caricamento dei nomi delle strade per i suggerimenti, con gestione degli errori
 try:
     from scripts.db_queries.queries import load_street_names
     STREET_NAMES = load_street_names()
@@ -123,36 +142,60 @@ except Exception as e:
     STREET_NAMES = []
     print(f"Impossibile caricare nomi strade: {e}")
 
-# Serve index.html dalla posizione trovata (se non trovata, lascia che Flask serva il file index.html nel static root)
+# Route principale per servire index.html, con gestione della posizione dinamica e fallback
 @app.route('/')
 def index():
-    # Use safe helper to avoid issues with leading slash on Windows
-    if INDEX_REL_PATH and FRONTEND_DIR:
+    # Prova a servire index.html dalla posizione rilevata dinamicamente usando la funzione sicura
+    if FRONTEND_DIR and INDEX_REL_PATH:
         res = safe_send_from_directory(FRONTEND_DIR, INDEX_REL_PATH)
         if res:
             return res
+
+    # Se non trovato sotto FRONTEND_DIR, prova a servirlo dalla cartella padre di INDEX (se disponibile)
+    if INDEX_PARENT:
+        res = safe_send_from_directory(INDEX_PARENT, 'index.html')
+        if res:
+            return res
+
+    # Prova a servire tramite la static folder configurata in Flask (app.static_folder)
     try:
         return app.send_static_file('index.html')
     except Exception:
-        return ('', 404)
+        pass
 
-# Route helper: prova a servire file statici prima dalla static root, poi dalla index parent (se diverso)
+    # Ultimo tentativo: cerca manualmente il file index.html nelle possibili cartelle e lo ritorna come testo
+    candidates = []
+    if FRONTEND_DIR:
+        candidates.append(Path(FRONTEND_DIR) / 'index.html')
+    if INDEX_PARENT:
+        candidates.append(Path(INDEX_PARENT) / 'index.html')
+    for c in candidates:
+        try:
+            if c.exists():
+                return (c.read_text(encoding='utf-8'), 200, {'Content-Type': 'text/html'})
+        except Exception:
+            # ignora errori di lettura e continua col prossimo candidato
+            pass
+
+    return ('', 404)
+
+# Funzione helper per tentare di servire file statici da FRONTEND_DIR o INDEX_PARENT
 def try_send_static(filename):
-    # strip leading slash/backslash to make it relative
+    # Rimuove leading slashes/backslashes per sicurezza
     fn = filename.lstrip('/\\')
-    # Attempt 1: from static root
+    # Primo tentativo: da FRONTEND_DIR
     if FRONTEND_DIR:
         res = safe_send_from_directory(FRONTEND_DIR, fn)
         if res:
             return res
-    # Attempt 2: from index parent (es. front-end/template)
+    # Secondo tentativo: da INDEX_PARENT
     if INDEX_PARENT:
         res = safe_send_from_directory(INDEX_PARENT, fn)
         if res:
             return res
     return None
 
-# Se index.html fa riferimento a /app.js ma il file è sotto una sottocartella, servilo correttamente
+# Se index.html fa riferimento a /app.js ma il file è sotto una sottocartella, gestiamo il caso
 @app.route('/app.js')
 def app_js():
     res = try_send_static('app.js')
@@ -160,8 +203,7 @@ def app_js():
         return res
     return ('', 404)
 
-# Specific routes for common asset folders (css, js, assets) to handle cases where index.html
-# resides in a subfolder but assets are located in sibling directories like ../css or ../assets
+# Specifiche route per cartelle comuni di file statici, con preferenza per FRONTEND_DIR
 @app.route('/css/<path:filename>')
 def css_file(filename):
     res = None
@@ -177,6 +219,7 @@ def css_file(filename):
             return res
     return ('', 404)
 
+# App.route per file JS nella cartella /js
 @app.route('/js/<path:filename>')
 def js_file(filename):
     res = None
@@ -203,11 +246,10 @@ def assets_file(filename):
             return res
     return ('', 404)
 
-# Aggiungiamo un catch-all per file statici non trovati che prova l'altra cartella
+# Viene aggiunta una route generica per servire altri file statici
 @app.route('/<path:filename>')
 def static_proxy(filename):
-    # Let Flask's static handling try first (it already handles static_folder), but this route will be used
-    # when static file not found via default mechanism. Try to serve from index parent as fallback.
+    # Prova a servire il file statico dalla cartella front-end rilevata dinamicamente
     res = try_send_static(filename)
     if res:
         return res
@@ -216,48 +258,46 @@ def static_proxy(filename):
 # Definizione della route API per trovare il rifugio più vicino
 @app.route('/api/nearest', methods=['POST'])
 def api_nearest():
-    # Estrazione dell'indirizzo dalla richiesta JSON
-    # Se l'indirizzo manca o non è valido, restituisce un errore 400
+    # Estrazione del parametro 'indirizzo' dal JSON della richiesta
     data = request.get_json(force=True)
     if not data or 'indirizzo' not in data:
         return jsonify({"successo": False, "messaggio": "Parametro 'indirizzo' mancante."}), 400
 
-    # Validazione dell'indirizzo
-    # Se l'indirizzo non è una stringa valida, restituisce un errore 400
+    # Validazione di 'indirizzo', deve essere una stringa non vuota altrimenti errore
     indirizzo = data.get('indirizzo')
     if not isinstance(indirizzo, str) or indirizzo.strip() == '':
         return jsonify({"successo": False, "messaggio": "Indirizzo non valido."}), 400
 
-    # Trova il rifugio più vicino utilizzando la funzione definita in posizione_utente.py
-    # Gestione delle eccezioni per problemi di geocoding o altri errori
+    # Chiamata alla funzione per trovare il rifugio più vicino, gestendo eventuali eccezioni
     try:
-        # Passiamo il geolocator condiviso per evitare di ricrearlo ogni richiesta
+        # Il geolocator viene passato per consentire mocking/testing
         risultato = trova_rifugio_piu_vicino(indirizzo, geolocator=get_geolocator())
         return jsonify(risultato)
     except Exception as e:
         return jsonify({"successo": False, "messaggio": str(e)}), 500
 
 
-# API endpoint per suggerimenti di strade (autocomplete) - ritorna oggetti strutturati
+# API endpoint per suggerimenti di strade (autocomplete)
 @app.route('/api/suggest-street')
 def suggest_street():
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'suggestions': []})
     q_low = q.lower()
-    # ricerca prefisso e anche occorrenze (prioritizza prefisso)
+
+    # Cerca corrispondenze che iniziano con la query, poi quelle che la contengono
     prefix_matches = [s for s in STREET_NAMES if s['display'].lower().startswith(q_low) or s['name'].lower().startswith(q_low)]
     contains_matches = [s for s in STREET_NAMES if (q_low in s['display'].lower() or q_low in s['name'].lower()) and s not in prefix_matches]
     results = prefix_matches + contains_matches
     results = results[:20]
 
-    # Arricchisci le suggestion con dati della cache di geocoding (se presenti)
+    # Arricchisci i risultati con lat/lon/postcode da GEOCODE_CACHE se disponibili
     enriched = []
     try:
         for s in results:
-            # copia per non mutare l'originale
+            # Copia dell'item per evitare modifiche all'originale
             item = dict(s)
-            # costruisci chiavi possibili usate in GEOCODE_CACHE
+            # Costruiamo possibili chiavi di ricerca per la cache
             keys = []
             if item.get('display'):
                 keys.append(item['display'].strip().lower())
@@ -271,7 +311,7 @@ def suggest_street():
                     keys.append(f"{name}, {city}".lower())
                 if city and state:
                     keys.append(f"{name}, {city}, {state}".lower())
-            # try to find a cache entry
+            # Cerca nella cache
             found = False
             for k in keys:
                 if k in GEOCODE_CACHE:
@@ -292,7 +332,7 @@ def suggest_street():
 
 @app.route('/api/debug-sample')
 def debug_sample():
-    # ritorna una voce campione con lat/lon per test rapido della UI
+    # Ritorna un esempio di indirizzo con lat/lon
     try:
         for s in STREET_NAMES:
             if s.get('lat') is not None and s.get('lon') is not None:
@@ -311,17 +351,31 @@ def debug_sample():
     }
     return jsonify({'sample': sample})
 
-# Aggiunta dell'endpoint per geocodifica on-demand
-# Geocodifica un indirizzo e restituisce lat/lon/postcode
-# Usa una cache in-memory per evitare chiamate ripetute
+# Aggiunta di una semplice cache in memoria per i risultati di geocoding
+# La cache mappa da query normalizzata (lowercase, stripped) a dizionario con lat, lon, postcode, display
 GEOCODE_CACHE = {}
 
 @app.route('/api/geocode-street', methods=['POST'])
 def geocode_street():
-    """Geocode on-demand a street entry. Accepts JSON with either:
-       { "name": "Cherry Avenue", "city": "Long Beach", "state": "CA" }
-       or { "q": "Cherry Avenue, Long Beach, CA" }
-       Returns { lat, lon, postcode, display }
+    """
+    Geocodifica on-demand di un indirizzo stradale.
+    Accetta JSON con:
+    - q: indirizzo completo (opzionale)
+    - name: nome della strada (opzionale se q fornito)
+    - city: città (opzionale)
+    - state: stato (opzionale)
+    Ritorna JSON con:
+    - lat: latitudine (float o null)
+    - lon: longitudine (float o null)
+    - postcode: codice postale (stringa o null)
+    - display: indirizzo usato per la geocodifica
+    In caso di errore, ritorna codice 500 con messaggio di errore.
+    1. Se 'q' non è fornito, lo costruisce da name, city, state.
+    2. Controlla la cache GEOCODE_CACHE per risultati precedenti.
+    3. Usa geolocator per ottenere lat/lon e tenta di estrarre il postcode.
+    4. In caso di fallimento, tenta di usare calcola_coordinate se disponibile.
+    5. Memorizza il risultato nella cache e lo ritorna.
+    6. In caso di errore, ritorna messaggio di errore.
     """
     data = request.get_json(force=True) or {}
     q = data.get('q')
@@ -343,16 +397,16 @@ def geocode_street():
     if key in GEOCODE_CACHE:
         return jsonify({'lat': GEOCODE_CACHE[key].get('lat'), 'lon': GEOCODE_CACHE[key].get('lon'), 'postcode': GEOCODE_CACHE[key].get('postcode'), 'display': GEOCODE_CACHE[key].get('display')})
 
-    # Use geolocator directly to obtain address details (postcode) when possible
+    # Utilizzo del geolocator per ottenere lat/lon e postcode
     try:
         geolocator = get_geolocator()
-        # try to get detailed address to extract postcode
+        # Cerca di geocodificare l'indirizzo
         location = None
         try:
-            # prefer addressdetails if supported
+            # Preferenza per addressdetails se supportato
             location = geolocator.geocode(q, addressdetails=True, exactly_one=True, timeout=10)
         except TypeError:
-            # some geolocators might not accept addressdetails param; fallback
+            # Alcuni geolocator non supportano addressdetails
             location = geolocator.geocode(q, exactly_one=True, timeout=10)
 
         result = {'lat': None, 'lon': None, 'postcode': None, 'display': q}
@@ -362,7 +416,7 @@ def geocode_street():
                 result['lon'] = float(location.longitude)
             except Exception:
                 pass
-            # attempt to extract postcode from raw address details
+            # Tenta di estrarre il postcode dai dettagli dell'indirizzo
             try:
                 raw = getattr(location, 'raw', {}) or {}
                 address = raw.get('address', {}) if isinstance(raw, dict) else {}
@@ -376,7 +430,7 @@ def geocode_street():
         GEOCODE_CACHE[key] = result
         return jsonify(result)
     except Exception as e:
-        # fallback: try calcola_coordinate if present
+        # Cerca di usare calcola_coordinate come fallback, se disponibile
         try:
             if calcola_coordinate is not None:
                 lat, lon = calcola_coordinate(q, geolocator=get_geolocator())

@@ -10,10 +10,14 @@ DATA_DIR = Path(__file__).resolve().parents[2] / 'dataset'
 
 def merge_streets(save_path: Path = None) -> pd.DataFrame:
     """
-    Carica i CSV delle strade (versioni cleaned) e unisce i nomi delle strade.
-    Aggiunge metadati 'city' e 'state' in base al file sorgente (Long Beach, Los Angeles, Orange).
-    Rimuove valori nulli, trim degli spazi, normalizza e rimuove duplicati (sul nome normalizzato + city).
-    Restituisce un DataFrame con colonne 'name','city','state' pulite e opzionalmente salva un CSV.
+    Carica i file CSV delle strade di Long Beach, Los Angeles e Orange City,
+    unifica i nomi delle strade rimuovendo duplicati e salva il risultato in un CSV.
+    @:param save_path: Path dove salvare il CSV unificato (default: dataset/strade_all_unique.csv)
+    @:return: DataFrame con le strade unificate
+    Formato del DataFrame risultante:
+        - name: nome della strada
+        - city: città (Long Beach, Los Angeles, Orange)
+        - state: stato (sempre 'CA')
     """
     files = [
         (DATA_DIR / 'strade_long_beach_cleaned.csv', 'Long Beach'),

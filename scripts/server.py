@@ -8,7 +8,7 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 try:
-    from flask import Flask, request, jsonify, send_from_directory, send_file
+    from flask import Flask, request, jsonify, send_from_directory, send_file, make_response
     from flask_cors import CORS
 except Exception as e:
     raise RuntimeError("Dipendenze mancanti: installa Flask e flask_cors (vedi requirements.txt)") from e
@@ -398,6 +398,44 @@ def geocode_street():
         except Exception:
             pass
         return jsonify({'error': f'Geocoding failed: {e}'}), 500
+
+# Aggiunta endpoint per servire i GeoJSON statici in modo sicuro
+GEOJSON_DIR = BASE_DIR / 'animali_qgis' / 'geojson'
+
+def _serve_geojson_safe(filename: str):
+    # Restringi la richiesta alla cartella GEOJSON_DIR per evitare path traversal
+    try:
+        target = (GEOJSON_DIR / filename).resolve()
+        base = GEOJSON_DIR.resolve()
+        # Verifica che il target sia effettivamente sotto la cartella prevista
+        target.relative_to(base)
+    except Exception:
+        return jsonify({'error': 'Invalid file path.'}), 400
+
+    if not target.exists():
+        return jsonify({'error': 'File not found.'}), 404
+
+    try:
+        resp = make_response(send_file(str(target)))
+        # GeoJSON MIME type
+        resp.headers['Content-Type'] = 'application/geo+json; charset=utf-8'
+        # caching breve: 5 minuti
+        resp.headers['Cache-Control'] = 'public, max-age=300, stale-while-revalidate=60'
+        return resp
+    except Exception as e:
+        return jsonify({'error': f'Unable to read file: {e}'}), 500
+
+
+@app.route('/api/geojson/zone_pericolose')
+def api_zone_pericolose():
+    """Serve il file zone_pericolose.geojson dalla cartella animali_qgis/geojson"""
+    return _serve_geojson_safe('zone_pericolose.geojson')
+
+
+@app.route('/api/geojson/animali_malati')
+def api_animali_malati():
+    """Serve il file animali_malati.geojson dalla cartella animali_qgis/geojson"""
+    return _serve_geojson_safe('animali_malati.geojson')
 
 # Avvio del server Flask in modalità debug, con PORT configurabile tramite variabile d'ambiente
 if __name__ == '__main__':

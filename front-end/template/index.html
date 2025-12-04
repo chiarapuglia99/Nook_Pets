@@ -19,43 +19,54 @@
         </svg>
         <span class="brand-text">Nook Pets</span>
       </div>
-      <div class="top-actions">Cerca rifugi vicini</div>
+      <div class="top-actions">
+        <button id="btn-focolai" class="linkish">Visualizza focolai</button>
+      </div>
     </nav>
 
-    <header class="hero">
-      <div class="hero-content">
-        <h1>Trova il rifugio per animali più vicino a te</h1>
-        <p class="lead">Inserisci un indirizzo e ti mostriamo il rifugio più vicino, la distanza e come arrivarci — rapido e semplice.</p>
-        <div class="hero-illustration" aria-hidden>
-          <!-- decorative paw background via CSS -->
+    <div id="home-view">
+      <header class="hero">
+        <div class="hero-content">
+          <h1>Trova il rifugio per animali più vicino a te</h1>
+          <p class="lead">Inserisci un indirizzo e ti mostriamo il rifugio più vicino...</p>
+          <div class="hero-illustration" aria-hidden></div>
         </div>
+
+        <form id="search-form" class="search-card">
+          <label for="indirizzo" class="sr-only">Indirizzo</label>
+          <input id="indirizzo" name="indirizzo" type="text" placeholder="Es. 4000 E Anaheim St, Long Beach" aria-label="Indirizzo">
+          <button id="btn-submit" type="submit">Cerca</button>
+        </form>
+      </header>
+
+      <section id="feedback" class="feedback" aria-live="polite"></section>
+
+      <section id="result" class="result hidden">
+        <h2>Rifugio più vicino</h2>
+        <div class="card result-card">
+          <div class="result-media">
+            <img id="animal-img" src="" alt="Immagine animale" />
+          </div>
+          <div class="result-body">
+            <p id="nome" class="bold"></p>
+            <p id="indirizzo-rifugio"></p>
+            <p id="distanza"></p>
+            <a id="directions-link" class="directions hidden" target="_blank" rel="noopener">Apri indicazioni</a>
+          </div>
+        </div>
+      </section>
+
+      <section id="map" class="map" aria-label="Mappa"></section>
+    </div>
+    <section id="map-focolai-container" class="map-focolai-container hidden">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2>Mappa Focolai</h2>
+        <button id="btn-back" class="linkish" style="font-size:0.9rem;">&larr; Torna alla ricerca</button>
       </div>
 
-      <form id="search-form" class="search-card">
-        <label for="indirizzo" class="sr-only">Indirizzo</label>
-        <input id="indirizzo" name="indirizzo" type="text" placeholder="Es. 4000 E Anaheim St, Long Beach" aria-label="Indirizzo">
-        <button id="btn-submit" type="submit">Cerca</button>
-      </form>
-    </header>
-
-    <section id="feedback" class="feedback" aria-live="polite"></section>
-
-    <section id="result" class="result hidden">
-      <h2>Rifugio più vicino</h2>
-      <div class="card result-card">
-        <div class="result-media">
-          <img id="animal-img" src="" alt="Immagine animale" />
-        </div>
-        <div class="result-body">
-          <p id="nome" class="bold"></p>
-          <p id="indirizzo-rifugio"></p>
-          <p id="distanza"></p>
-          <a id="directions-link" class="directions hidden" target="_blank" rel="noopener">Apri indicazioni</a>
-        </div>
-      </div>
+      <div id="map-focolai" class="map map-focolai" aria-label="Mappa focolai"></div>
+      <div id="legend-focolai" class="legend-focolai" aria-hidden="true"></div>
     </section>
-
-    <section id="map" class="map" aria-label="Mappa" ></section>
 
     <footer class="footer">
       <p>Creato con ❤️ per gli animali — immagini a scopo illustrativo</p>

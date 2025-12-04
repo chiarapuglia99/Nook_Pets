@@ -9,28 +9,51 @@ output_path = base_dir / 'dataset' / 'animali-rifugi-clean.csv'
 
 df = pd.read_csv(input_path)
 
-# 1. Colonna Health da Sex
-# Crea la colonna Health
-if 'Health' not in df.columns:
-    df['Health'] = None
-mask = df['Sex'].isin(['Spayed', 'Neutered'])
-df.loc[mask, 'Health'] = df.loc[mask, 'Sex']
-df.loc[df['Health'] == 'Spayed', 'Sex'] = 'Female'
-df.loc[df['Health'] == 'Neutered', 'Sex'] = 'Male'
-# Regole aggiuntive
-condition_female = (df['Sex'] == 'Female') & (df['Health'].isnull())
-df.loc[condition_female, 'Health'] = 'Spayed'
-condition_male = (df['Sex'] == 'Male') & (df['Health'].isnull())
-df.loc[condition_male, 'Health'] = 'Neutered'
+# funzione di utilità per rimuovere caratteri di elenco iniziali o qualsiasi punteggiatura iniziale
+def _strip_leading_non_alnum(val):
+    # preserva NaN
+    if pd.isna(val):
+        return val
+    s = str(val)
+    # rimuove i caratteri iniziali fino al primo carattere alfanumerico
+    i = 0
+    L = len(s)
+    while i < L and not s[i].isalnum():
+        i += 1
+    return s[i:].strip()
 
+# 0. Assicuriamoci che la colonna Health esista e riempiamo i null con 'Unknown' (case-insensitive)
+if 'Health' not in df.columns and 'health' in df.columns:
+    df['Health'] = df['health']
+
+if 'Health' in df.columns:
+    df['Health'] = df['Health'].apply(lambda x: x if not (pd.isna(x) or str(x).strip()=='' ) else pd.NA)
+    df['Health'] = df['Health'].fillna('Unknown')
+else:
+    # crea colonna se non esiste
+    df['Health'] = 'Unknown'
+
+print("Valori unici in 'Health':", df['Health'].unique()[:20])
+
+# 1. Colonna Health da Sex (se utile)
+if 'Sex' in df.columns:
+    # Crea la colonna Health se vuota
+    mask = df['Sex'].isin(['Spayed', 'Neutered'])
+    df.loc[mask, 'Health'] = df.loc[mask, 'Sex']
+    df.loc[df['Health'] == 'Spayed', 'Sex'] = 'Female'
+    df.loc[df['Health'] == 'Neutered', 'Sex'] = 'Male'
+    condition_female = (df['Sex'] == 'Female') & (df['Health'].isnull())
+    df.loc[condition_female, 'Health'] = 'Spayed'
+    condition_male = (df['Sex'] == 'Male') & (df['Health'].isnull())
+    df.loc[condition_male, 'Health'] = 'Neutered'
+
+# Garanzia finale: tutti i null in Health <-> 'Unknown'
 df['Health'] = df['Health'].fillna('Unknown')
-print("Valori null sostituiti in 'Health':")
-print(df['Health'].unique())
 
 # 2. Colonna Animal Name: sostituisci NULL con Unknown e rimuovi asterisco iniziale
 if 'Animal Name' in df.columns:
     df['Animal Name'] = df['Animal Name'].fillna('Unknown')
-    df['Animal Name'] = df['Animal Name'].astype(str).str.lstrip('*')
+    df['Animal Name'] = df['Animal Name'].astype(str).str.lstrip('*').str.strip()
 
 # 3. Colonna DOB: sostituisci NULL con Unknown
 if 'DOB' in df.columns:
@@ -73,12 +96,12 @@ for col in ['outcome_is_dead', 'outcome_is_other', 'outcome_is_alive']:
 
 # 8. Rimozione del punto o simbolo iniziale da outcome_is_dead, outcome_is_other, outcome_is_alive
 cols_to_clean = ['outcome_is_dead', 'outcome_is_other', 'outcome_is_alive']
-# Rimuove qualsiasi carattere non alfanumerico iniziale
-pattern = r'^[^\w\d]+'
 for col in cols_to_clean:
     if col in df.columns:
-        df[col] = df[col].fillna('').astype(str).str.replace(pattern, '', regex=True).str.strip()
-
+        # fillna to avoid errors, apply stripping function
+        df[col] = df[col].fillna('').astype(str).apply(_strip_leading_non_alnum).str.strip()
+        # se la cella risultasse vuota, mantieni stringa vuota o imposta NA a seconda delle preferenze
+        df[col] = df[col].replace({'': pd.NA})
 
 # 9. Reason for Intake: rinomina e sostituisci NULL/"NULL" con Unknown
 if 'Reason for Intake' in df.columns:
@@ -91,5 +114,6 @@ if 'Reason for Intake' in df.columns:
 print(f"Salvataggio su {output_path}")
 # Crea la cartella di destinazione se non esiste
 Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-df.to_csv(output_path, index=False)
+# Salviamo in UTF-8 per mantenere i caratteri speciali
+df.to_csv(output_path, index=False, encoding='utf-8')
 print("Pulizia completata.")

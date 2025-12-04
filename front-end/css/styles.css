@@ -63,6 +63,21 @@ body{font-family:Inter, Roboto, system-ui, -apple-system, BlinkMacSystemFont, 'S
 /* Map */
 .map{height:520px;margin-top:18px;border-radius:14px;overflow:hidden;background:#f6f9ff;border:1px solid rgba(10,20,40,0.03);box-shadow:var(--shadow-sm)}
 
+/* Topbar small action as button */
+.linkish{background:none;border:0;color:var(--primary);font-weight:700;cursor:pointer;padding:6px 10px;border-radius:8px}
+.linkish:hover{background:rgba(0,102,255,0.06)}
+
+/* Mappa focolai: dimensioni e layout */
+.map-focolai{height:520px}
+.map-focolai-container{margin-top:18px;border-radius:14px;padding:12px;background:linear-gradient(180deg,#ffffff,#fbfbff);box-shadow:var(--shadow-sm);}
+
+/* Legend */
+.legend-focolai{position:relative;margin-top:10px}
+.legend-wrapper{display:flex;flex-wrap:wrap;gap:10px}
+.legend-row{display:flex;align-items:center;gap:8px;background:var(--card);padding:6px 8px;border-radius:8px;border:1px solid rgba(10,20,40,0.04)}
+.legend-swatch{width:18px;height:18px;border-radius:6px;display:inline-block}
+.legend-label{font-size:0.92rem;color:#213547}
+
 .footer{margin-top:16px;text-align:center;color:var(--muted);font-size:0.9rem}
 
 /* Spinner small */

@@ -12,8 +12,8 @@ const btn = document.getElementById('btn-submit');
 const animalImg = document.getElementById('animal-img');
 const directionsLink = document.getElementById('directions-link');
 
-// Nuovi elementi per la gestione delle viste (Home vs Focolai)
-const homeView = document.getElementById('home-view'); 
+// Elementi Vista Focolai
+const homeView = document.getElementById('home-view');
 const btnFocolai = document.getElementById('btn-focolai');
 const mapFocolaiContainer = document.getElementById('map-focolai-container');
 const legendFocolaiEl = document.getElementById('legend-focolai');
@@ -25,19 +25,18 @@ const btnBack = document.getElementById('btn-back');
 let map = null;
 let userMarker = null;
 let shelterMarker = null;
-let routingControl = null; // <--- NUOVO: Variabile per gestire la linea rossa del percorso
 
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
 
-// Piccola lista di immagini/gif pubbliche
+// Pool immagini
 const animalMediaPool = [
-  'https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=800&q=60&auto=format&fit=crop&ixlib=rb-4.0.3&s=0a2a1f9d0f9b3c8b6e6b8b8d2a1f8f1d',
-  'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=800&q=60&auto=format&fit=crop&ixlib=rb-4.0.3&s=0b2d9b9f2a6f1a1b2c3d4e5f6a7b8c9d',
+  'https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=800&q=60&auto=format&fit=crop',
+  'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=800&q=60&auto=format&fit=crop',
   'https://media.giphy.com/media/3o6Zt8MgUuvSbkZYWc/giphy.gif',
   'https://media.giphy.com/media/26BRuo6sLetdllPAQ/giphy.gif',
-  'https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=800&q=60&auto=format&fit=crop&ixlib=rb-4.0.3&s=1a2b3c4d5e6f7g8h9i0j'
+  'https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=800&q=60&auto=format&fit=crop'
 ];
 
 // ==========================================
@@ -52,9 +51,7 @@ function showFeedback(msg, isError=false, withSpinner=false) {
   feedback.style.color = isError ? '#c53030' : '#374151';
   if (withSpinner) {
     if (!document.querySelector('.spinner')) {
-      const s = document.createElement('span');
-      s.className = 'spinner';
-      feedback.appendChild(s);
+      const s = document.createElement('span'); s.className = 'spinner'; feedback.appendChild(s);
     }
   } else {
     const s = document.querySelector('.spinner');
@@ -79,8 +76,7 @@ function initMap(lat=34.0219, lng=-118.4814, zoom=10) {
   if (!map) {
     map = L.map('map').setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
+      maxZoom: 19, attribution: '© OpenStreetMap contributors'
     }).addTo(map);
   } else {
     map.setView([lat, lng], zoom);
@@ -91,23 +87,17 @@ function resetMap() {
   if (!map) return;
   if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
   if (shelterMarker) { map.removeLayer(shelterMarker); shelterMarker = null; }
-  // <--- NUOVO: Rimuove la linea rossa precedente se esiste
-  if (routingControl) { map.removeControl(routingControl); routingControl = null; }
 }
 
-// Inizializza mappa vuota al caricamento della pagina
+// Inizializza mappa vuota
 initMap();
-// Preload immagine casuale
 animalImg.src = pickRandomMedia();
 
-// Handler Form Ricerca
+// Handler Form
 form.addEventListener('submit', async (e)=>{
   e.preventDefault();
   const indirizzo = indirizzoInput.value.trim();
-  if (!indirizzo) {
-    showFeedback('Inserisci un indirizzo valido.', true);
-    return;
-  }
+  if (!indirizzo) { showFeedback('Inserisci un indirizzo valido.', true); return; }
 
   setButtonLoading(true);
   showFeedback('Sto cercando il rifugio più vicino...', false, true);
@@ -115,14 +105,11 @@ form.addEventListener('submit', async (e)=>{
 
   try {
     const resp = await fetch('/api/nearest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ indirizzo })
     });
 
     const json = await resp.json();
-    console.log('[NookPets] API response:', json);
-
     if (!resp.ok || !json.successo) {
       showFeedback(json.messaggio || 'Indirizzo non trovato.', true);
       setButtonLoading(false);
@@ -130,21 +117,13 @@ form.addEventListener('submit', async (e)=>{
     }
 
     const dati = json.dati_rifugio;
-    // Assicuriamoci che le coordinate siano numeri float
     const coordUserRaw = json.coordinate_utente || [];
     const coordShelterRaw = dati.posizione_rifugio || [];
 
-    // Convertiamo in float per sicurezza
+    // Normalizzazione coordinate
     const coordUser = Array.isArray(coordUserRaw) ? coordUserRaw.map(Number) : [Number(coordUserRaw[0]), Number(coordUserRaw[1])];
     const coordShelter = Array.isArray(coordShelterRaw) ? coordShelterRaw.map(Number) : [Number(coordShelterRaw[0]), Number(coordShelterRaw[1])];
 
-    if (!coordUser || coordUser.length < 2 || !coordShelter || coordShelter.length < 2) {
-      showFeedback('Coordinate non valide.', true);
-      setButtonLoading(false);
-      return;
-    }
-
-    // Aggiornamento UI Testuale
     nomeEl.textContent = dati.nome;
     indirizzoRifugioEl.textContent = dati.indirizzo;
     distanzaEl.textContent = `Distanza: ${dati.distanza_km} km`;
@@ -155,46 +134,20 @@ form.addEventListener('submit', async (e)=>{
       const s = `${coordShelter[0]},${coordShelter[1]}`;
       directionsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(u)}&destination=${encodeURIComponent(s)}&travelmode=driving`;
       directionsLink.classList.remove('hidden');
-    } else {
-      directionsLink.classList.add('hidden');
     }
 
     resultSection.classList.remove('hidden');
     showFeedback('Risultato trovato.');
 
-    // -----------------------------------------------------
-    // LOGICA MAPPA E ROUTING (Linea Rossa)
-    // -----------------------------------------------------
-
-    // Resetta marker e percorsi vecchi
-    resetMap();
-
-    // Centra mappa sull'utente inizialmente (verrà poi adattata dal routing)
     initMap(coordUser[0], coordUser[1], 12);
-
-    // Aggiungi Marker Utente e Rifugio
-    userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu');
-    shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome).openPopup();
-
-    // <--- NUOVO: Calcolo e disegno del percorso stradale
-    routingControl = L.Routing.control({
-      waypoints: [
-        L.latLng(coordUser[0], coordUser[1]),
-        L.latLng(coordShelter[0], coordShelter[1])
-      ],
-      lineOptions: {
-        styles: [{ color: 'red', opacity: 0.7, weight: 5 }] // Stile: Linea Rossa spessa
-      },
-      show: false,             // Nasconde il box bianco con le istruzioni testuali
-      addWaypoints: false,     // Disabilita l'aggiunta di tappe trascinando
-      draggableWaypoints: false,
-      routeWhileDragging: false,
-      fitSelectedRoutes: true, // Adatta lo zoom per mostrare tutto il percorso
-      createMarker: function() { return null; } // Non creare marker duplicati (usiamo i nostri userMarker/shelterMarker)
-    }).addTo(map);
+    resetMap();
+    userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
+    shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
+    const group = L.featureGroup([userMarker, shelterMarker]);
+    map.fitBounds(group.getBounds().pad(0.4));
 
   } catch (err) {
-    console.error('[NookPets] fetch error', err);
+    console.error(err);
     showFeedback('Errore di rete o del server.', true);
   } finally {
     setButtonLoading(false);
@@ -202,31 +155,24 @@ form.addEventListener('submit', async (e)=>{
 });
 
 // ==========================================
-// LOGICA AUTOCOMPLETE
+// LOGICA AUTOCOMPLETE (Da Versione 1)
 // ==========================================
 let acContainer = null;
 let acItems = [];
 let acSelected = -1;
 let acAbortController = null;
-const GEOCODE_CACHE = {};
 
-if (indirizzoInput) {
-  indirizzoInput.setAttribute('autocomplete', 'off');
-}
+if (indirizzoInput) { indirizzoInput.setAttribute('autocomplete', 'off'); }
 
 function createAutocomplete() {
   acContainer = document.createElement('div');
   acContainer.className = 'autocomplete-container';
-  acContainer.style.position = 'absolute';
-  acContainer.style.zIndex = 99999;
-  acContainer.style.background = 'white';
-  acContainer.style.border = '1px solid rgba(0,0,0,0.08)';
-  acContainer.style.borderRadius = '8px';
-  acContainer.style.boxShadow = '0 6px 18px rgba(2,6,23,0.08)';
-  acContainer.style.maxHeight = '260px';
-  acContainer.style.overflow = 'auto';
-  acContainer.style.display = 'none';
-  acContainer.style.padding = '6px 4px';
+  Object.assign(acContainer.style, {
+    position: 'absolute', zIndex: 99999, background: 'white',
+    border: '1px solid rgba(0,0,0,0.08)', borderRadius: '8px',
+    boxShadow: '0 6px 18px rgba(2,6,23,0.08)', maxHeight: '260px',
+    overflow: 'auto', display: 'none', padding: '6px 4px'
+  });
   document.body.appendChild(acContainer);
 }
 
@@ -255,10 +201,9 @@ function renderAutocomplete(items) {
   items.forEach((item, idx) => {
     const el = document.createElement('div');
     el.className = 'ac-item';
-    el.style.padding = '8px 10px';
-    el.style.cursor = 'pointer';
-    el.style.borderRadius = '6px';
-    el.style.margin = '2px 0';
+    Object.assign(el.style, {
+        padding: '8px 10px', cursor: 'pointer', borderRadius: '6px', margin: '2px 0'
+    });
 
     let displayText = typeof item === 'string' ? item : (item.display || item.name || '');
     let metaText = '';
@@ -270,15 +215,13 @@ function renderAutocomplete(items) {
 
     const title = document.createElement('div');
     title.textContent = displayText;
-    title.style.fontWeight = '600';
-    title.style.fontSize = '0.95rem';
+    title.style.fontWeight = '600'; title.style.fontSize = '0.95rem';
 
     el.appendChild(title);
     if (metaText) {
       const sub = document.createElement('div');
       sub.textContent = metaText;
-      sub.style.fontSize = '0.82rem';
-      sub.style.color = '#6b7280';
+      sub.style.fontSize = '0.82rem'; sub.style.color = '#6b7280';
       el.appendChild(sub);
     }
 
@@ -293,12 +236,8 @@ function renderAutocomplete(items) {
     acItems.push(el);
   });
 
-  if (items.length) {
-    acContainer.style.display = 'block';
-    positionAutocomplete();
-  } else {
-    clearAutocomplete();
-  }
+  if (items.length) { acContainer.style.display = 'block'; positionAutocomplete(); }
+  else { clearAutocomplete(); }
 }
 
 async function selectAutocomplete(i) {
@@ -315,7 +254,7 @@ async function selectAutocomplete(i) {
   clearAutocomplete();
   indirizzoInput.focus();
 
-  // Geocodifica on demand se mancano lat/lon
+  // Geocodifica on demand
   let lat = item.lat != null ? Number(item.lat) : null;
   let lon = item.lon != null ? Number(item.lon) : null;
 
@@ -323,8 +262,7 @@ async function selectAutocomplete(i) {
     try {
       showFeedback('Ricavo coordinate...', false, true);
       const res = await fetch('/api/geocode-street', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name: item.name, city: item.city, state: item.state, q: item.display})
       });
       if (res.ok) {
@@ -337,7 +275,7 @@ async function selectAutocomplete(i) {
 
   if (lat && lon) {
     initMap(lat, lon, 14);
-    resetMap(); // Resetta anche eventuali percorsi vecchi
+    resetMap();
     userMarker = L.marker([lat, lon]).addTo(map).bindPopup('Posizione selezionata').openPopup();
   }
 }
@@ -368,235 +306,197 @@ indirizzoInput.addEventListener('input', debounce(async () => {
 window.addEventListener('resize', positionAutocomplete);
 createAutocomplete();
 
-
 // ==========================================
-// LOGICA FOCOLAI (Zone & Animali)
+// LOGICA FOCOLAI - VERSIONE AVANZATA (V2)
 // ==========================================
 
-// Configurazione Colori
 const TYPE_PALETTE = {
-  'cane': ['#ff6b6b', '#7f1d1d'],
-  'gatto': ['#4dabf7', '#08306b'],
-  'uccello': ['#ffd166', '#7a4f00'],
-  'coniglio': ['#b39ddb', '#4a148c'],
-  'sconosciuto': ['#9ca3af', '#374151']
+  'dog': ['#ef4444', '#991b1b'],     // Rosso Chiaro, Rosso Scuro
+  'cat': ['#3b82f6', '#1e3a8a'],     // Blu Chiaro, Blu Scuro
+  'bird': ['#eab308', '#854d0e'],    // Giallo, Marrone
+  'rabbit': ['#a855f7', '#581c87'],  // Viola Chiaro, Viola Scuro
+  'other': ['#6b7280', '#1f2937']    // Grigio Chiaro, Grigio Scuro
 };
 
-const COLOR_NAME_MAP = {
-  'WHITE': '#ffffff', 'BLACK': '#000000', 'GRAY': '#9ca3af', 'BROWN': '#8b5e3c',
-  'BLUE': '#3b82f6', 'GREEN': '#10b981', 'RED': '#ef4444', 'YELLOW': '#f59e0b', 'ORANGE': '#f97316'
-};
-
-// Utilities Focolai
-function getProp(p, candidates) {
-  for (const k of candidates) {
-    if (p && p[k] != null && String(p[k]).trim() !== '') return p[k];
-  }
-  return null;
-}
-
-function determinePalette(p) {
-  const colorName = getProp(p, ['color_primary', 'primary_color']);
-  if (colorName && COLOR_NAME_MAP[colorName.toUpperCase()]) {
-    return [COLOR_NAME_MAP[colorName.toUpperCase()], '#333'];
-  }
-  const tipo = getAnimalTypeLabel(p).toLowerCase();
-  return TYPE_PALETTE[tipo] || TYPE_PALETTE['sconosciuto'];
-}
-
-function getAnimalTypeLabel(p) {
-  const raw = getProp(p, ['tipo', 'species', 'Animal Type', 'Animal_Type']);
-  if (!raw) return 'Sconosciuto';
-  const low = String(raw).toLowerCase();
-  if (low.includes('cat') || low.includes('gatto')) return 'Gatto';
-  if (low.includes('dog') || low.includes('cane')) return 'Cane';
-  if (low.includes('bird')) return 'Uccello';
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
-}
-
-// 1. DEFINIZIONE LAYERS
-zoneLayer = L.geoJSON(null, {
-  style: () => ({ color: '#6366f1', weight: 2, opacity: 0.8, fillOpacity: 0.1 }),
-  onEachFeature: (feature, layer) => {
-    const nome = feature.properties.nome || 'Zona Monitorata';
-    layer.bindPopup(`<b>${nome}</b>`);
-  }
-});
-
-// Stato visibilità tipi
 const visibleTypes = {};
 
-// 2. FUNZIONE INIZIALIZZAZIONE MAPPA FOCOLAI
+// Helper Robusto per Shapefile (trova chiavi troncate)
+function getVal(props, keys) {
+    if (!props) return null;
+    const propKeys = Object.keys(props);
+    for (let key of keys) {
+        if (props[key] !== undefined) return props[key];
+        const found = propKeys.find(k => k.toLowerCase() === key.toLowerCase());
+        if (found) return props[found];
+    }
+    return null;
+}
+
+function getAnimalInfo(props) {
+    const rawType = getVal(props, ['Animal Typ', 'Animal Type', 'animal_type', 'Type', 'species']) || 'Other';
+    const cleanType = String(rawType).toLowerCase();
+    let key = 'other';
+    if (cleanType.includes('dog') || cleanType.includes('cane')) key = 'dog';
+    else if (cleanType.includes('cat') || cleanType.includes('gatto')) key = 'cat';
+    else if (cleanType.includes('bird') || cleanType.includes('uccello')) key = 'bird';
+    else if (cleanType.includes('rabbit') || cleanType.includes('coniglio')) key = 'rabbit';
+    return { label: rawType, key: key, palette: TYPE_PALETTE[key] || TYPE_PALETTE['other'] };
+}
+
+// Inizializzazione Layers
+zoneLayer = L.geoJSON(null, {
+  style: { color: '#dc2626', weight: 5, opacity: 0.7 },
+  onEachFeature: (f, l) => l.bindPopup(`<b>ZONA PERICOLOSA:</b><br>${f.properties.name || 'Strada a rischio'}`)
+});
+animaliLayer = L.geoJSON(null);
+
 function initFocolaiMap() {
-  if (mapFocolai) {
-    setTimeout(() => { mapFocolai.invalidateSize(); }, 100);
-    return;
-  }
-
-  // Crea mappa
-  mapFocolai = L.map('map-focolai').setView([34.0219, -118.4814], 10);
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '© OpenStreetMap contributors'
-  }).addTo(mapFocolai);
-
+  if (mapFocolai) { setTimeout(() => mapFocolai.invalidateSize(), 100); return; }
+  mapFocolai = L.map('map-focolai').setView([34.0219, -118.4814], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapFocolai);
   zoneLayer.addTo(mapFocolai);
 }
 
-// 3. CARICAMENTO DATI (Fetch Zone + Animali)
 async function loadFocolai() {
   if (!mapFocolai) return;
-
+  showFeedback('Carico database animali...', false, true);
   try {
-    showFeedback('Caricamento dati focolai...', false, true);
-
-    // Fetch Zone
-    const respZone = await fetch('/api/geojson/zone_pericolose');
-    if (respZone.ok) {
-      const dataZone = await respZone.json();
-      zoneLayer.clearLayers();
-      zoneLayer.addData(dataZone);
+    // 1. Zone
+    const resZone = await fetch('/api/geojson/zone_pericolose');
+    if (resZone.ok) {
+        zoneLayer.clearLayers();
+        zoneLayer.addData(await resZone.json());
     }
+    // 2. Animali
+    const resAnim = await fetch('/api/geojson/animali_malati');
+    if (resAnim.ok) {
+        const data = await resAnim.json();
+        if (animaliLayer) mapFocolai.removeLayer(animaliLayer);
 
-    // Fetch Animali
-    const respAnimali = await fetch('/api/geojson/animali_malati');
-    if (respAnimali.ok) {
-      const dataAnimali = await respAnimali.json();
+        animaliLayer = L.geoJSON(data, {
+            pointToLayer: (feature, latlng) => {
+                const info = getAnimalInfo(feature.properties);
+                return L.circleMarker(latlng, {
+                    radius: 7, fillColor: info.palette[0], color: '#fff',
+                    weight: 1.5, opacity: 1, fillOpacity: 0.9
+                });
+            },
+            onEachFeature: (feature, layer) => {
+                const p = feature.properties;
+                const info = getAnimalInfo(p);
+                layer._tipoKey = info.key;
 
-      if (animaliLayer) mapFocolai.removeLayer(animaliLayer);
+                // Recupero dati robusto
+                const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
+                const nome = (rawName.toLowerCase() === 'unknown' || rawName.trim() === '') ? "Senza nome" : rawName;
+                const condizione = getVal(p, ['Intake Con', 'Intake Condition', 'Intake_Condition', 'condition']) || "Non specificato";
+                const colPrimario = getVal(p, ['Primary Co', 'Primary Color', 'PrimaryColor', 'Color']) || "N/A";
+                const colSecondario = getVal(p, ['Secondary Co', 'Secondary', 'Secondary C', 'Secondar_1', 'Secondary Color']) || "N/A";
 
-      animaliLayer = L.geoJSON(dataAnimali, {
-        pointToLayer: (feature, latlng) => {
-          const palette = determinePalette(feature.properties);
-          return L.circleMarker(latlng, {
-            radius: 6, fillColor: palette[0], color: palette[1], weight: 1, fillOpacity: 0.9
-          });
-        },
-        onEachFeature: (feature, layer) => {
-          const p = feature.properties;
-          const tipo = getAnimalTypeLabel(p);
-          const note = getProp(p, ['note', 'notes']) || '';
+                const content = `
+                    <div style="font-family:sans-serif; font-size:14px; min-width:200px;">
+                        <div style="background:${info.palette[0]}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">
+                            ${String(info.label).toUpperCase()}
+                        </div>
+                        <div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;">
+                            <div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div>
+                            <div style="margin-bottom:6px;">
+                                <b>Salute:</b> <span style="color:#c53030; background:#fee2e2; padding:2px 5px; border-radius:4px; font-weight:bold;">${condizione}</span>
+                            </div>
+                            <div style="color:#666; margin-bottom:2px;"><b>Colore Primario:</b> ${colPrimario}</div>
+                            <div style="color:#666;"><b>Colore Secondario:</b> ${colSecondario}</div>
+                        </div>
+                    </div>
+                `;
+                layer.bindPopup(content);
+            }
+        });
 
-          layer._tipo = tipo.toLowerCase();
+        animaliLayer.addTo(mapFocolai);
 
-          const content = `<div style="font-weight:bold">${tipo}</div>
-                           <div style="font-size:0.9em">${note}</div>`;
-          layer.bindPopup(content);
-        }
-      }).addTo(mapFocolai);
+        // Auto-Zoom
+        const bounds = zoneLayer.getBounds();
+        if(animaliLayer.getLayers().length > 0) bounds.extend(animaliLayer.getBounds());
+        if (bounds.isValid()) mapFocolai.fitBounds(bounds.pad(0.1));
 
-      const group = L.featureGroup();
-      if (zoneLayer.getLayers().length) group.addLayer(zoneLayer);
-      if (animaliLayer.getLayers().length) group.addLayer(animaliLayer);
-      if (group.getLayers().length) mapFocolai.fitBounds(group.getBounds().pad(0.2));
-
-      buildLegend(dataAnimali);
+        buildLegend();
     }
-
     showFeedback('');
-
   } catch (e) {
     console.error(e);
     showFeedback('Errore caricamento focolai.', true);
   }
 }
 
-// 4. LEGENDA E FILTRI
-function updateAnimaliVisibility() {
-  if (!animaliLayer) return;
-  animaliLayer.eachLayer(layer => {
-    const tipo = layer._tipo || 'sconosciuto';
-    const isVisible = visibleTypes[tipo] !== false;
-
-    if (isVisible) {
-       if (layer._origStyle) layer.setStyle(layer._origStyle);
-       else layer.setOpacity(1);
-       if (layer.getElement()) layer.getElement().style.display = '';
-    } else {
-       if (!layer._origStyle) layer._origStyle = { ...layer.options };
-       if (layer.getElement()) layer.getElement().style.display = 'none';
-    }
-  });
+function updateVisibility() {
+    if (!animaliLayer) return;
+    animaliLayer.eachLayer(layer => {
+        const k = layer._tipoKey;
+        const visible = visibleTypes[k] !== false;
+        if (visible) {
+            if (layer.getElement()) layer.getElement().style.display = '';
+            layer.openPopup = layer.constructor.prototype.openPopup;
+        } else {
+            if (layer.getElement()) layer.getElement().style.display = 'none';
+            layer.closePopup();
+            layer.openPopup = () => {};
+        }
+    });
 }
 
-function toggleType(tipoRaw) {
-  const tipo = tipoRaw.toLowerCase();
-  visibleTypes[tipo] = !visibleTypes[tipo];
-  updateAnimaliVisibility();
-
-  const rows = legendFocolaiEl.querySelectorAll('.legend-row');
-  rows.forEach(r => {
-    if (r.dataset.type === tipo) {
-      r.style.opacity = visibleTypes[tipo] ? '1' : '0.4';
-    }
-  });
+function toggleType(key) {
+    visibleTypes[key] = !visibleTypes[key];
+    updateVisibility();
+    const row = document.getElementById(`leg-row-${key}`);
+    if(row) row.style.opacity = visibleTypes[key] ? '1' : '0.4';
 }
 
-function buildLegend(geoJson) {
-  if (!legendFocolaiEl) return;
-  legendFocolaiEl.innerHTML = '';
-  const typesFound = new Set();
-  const sampleColors = {};
+function buildLegend() {
+    if (!legendFocolaiEl || !animaliLayer) return;
+    legendFocolaiEl.innerHTML = '<h5 style="margin:0 0 8px 0; font-size:0.9rem; font-weight:bold;">Legenda Specie</h5>';
 
-  geoJson.features.forEach(f => {
-    const t = getAnimalTypeLabel(f.properties).toLowerCase();
-    typesFound.add(t);
-    if (!sampleColors[t]) sampleColors[t] = determinePalette(f.properties);
-  });
+    const keysFound = new Set();
+    animaliLayer.eachLayer(l => keysFound.add(l._tipoKey));
+    keysFound.forEach(key => {
+        if(visibleTypes[key] === undefined) visibleTypes[key] = true;
 
-  const wrapper = document.createElement('div');
-  wrapper.className = 'legend-wrapper';
+        const pal = TYPE_PALETTE[key] || TYPE_PALETTE['other'];
+        const row = document.createElement('div');
+        row.id = `leg-row-${key}`;
+        Object.assign(row.style, { display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: '6px' });
 
-  typesFound.forEach(t => {
-    visibleTypes[t] = true;
+        const dot = document.createElement('span');
+        Object.assign(dot.style, {
+            width: '18px', height: '18px',
+            background: `linear-gradient(135deg, ${pal[0]} 50%, ${pal[1]} 50%)`,
+            border: '1px solid #9ca3af', borderRadius: '50%', marginRight: '8px'
+        });
 
-    const row = document.createElement('div');
-    row.className = 'legend-row';
-    row.dataset.type = t;
-    row.style.cursor = 'pointer';
-    row.style.display = 'flex';
-    row.style.alignItems = 'center';
-    row.style.marginRight = '10px';
+        let labelTxt = key.charAt(0).toUpperCase() + key.slice(1);
+        if(key === 'dog') labelTxt = 'Cane';
+        if(key === 'cat') labelTxt = 'Gatto';
+        if(key === 'bird') labelTxt = 'Uccello';
 
-    const colorBox = document.createElement('span');
-    colorBox.style.width = '16px';
-    colorBox.style.height = '16px';
-    colorBox.style.backgroundColor = sampleColors[t][0];
-    colorBox.style.border = `2px solid ${sampleColors[t][1]}`;
-    colorBox.style.borderRadius = '50%';
-    colorBox.style.display = 'inline-block';
-    colorBox.style.marginRight = '6px';
+        const txt = document.createElement('span');
+        txt.textContent = labelTxt;
+        txt.style.fontSize = '0.9rem';
 
-    const label = document.createElement('span');
-    label.textContent = t.charAt(0).toUpperCase() + t.slice(1);
-
-    row.appendChild(colorBox);
-    row.appendChild(label);
-
-    row.addEventListener('click', () => toggleType(t));
-    wrapper.appendChild(row);
-  });
-
-  legendFocolaiEl.appendChild(wrapper);
-  legendFocolaiEl.classList.remove('hidden');
+        row.appendChild(dot);
+        row.appendChild(txt);
+        row.onclick = () => toggleType(key);
+        legendFocolaiEl.appendChild(row);
+    });
+    legendFocolaiEl.classList.remove('hidden');
 }
 
-// ==========================================
-// GESTIONE CAMBIO VISTA (Home <-> Focolai)
-// ==========================================
-
-if (btnFocolai) {
-  btnFocolai.addEventListener('click', () => {
-    if (homeView) homeView.classList.add('hidden');
-    if (mapFocolaiContainer) mapFocolaiContainer.classList.remove('hidden');
+// Gestione Navigazione
+if (btnFocolai) btnFocolai.onclick = () => {
+    homeView.classList.add('hidden');
+    mapFocolaiContainer.classList.remove('hidden');
     initFocolaiMap();
     loadFocolai();
-  });
-}
-
-if (btnBack) {
-  btnBack.addEventListener('click', () => {
-    if (mapFocolaiContainer) mapFocolaiContainer.classList.add('hidden');
-    if (homeView) homeView.classList.remove('hidden');
-  });
-}
+};
+if (btnBack) btnBack.onclick = () => {
+    mapFocolaiContainer.classList.add('hidden');
+    homeView.classList.remove('hidden');
+};

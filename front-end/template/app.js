@@ -25,6 +25,7 @@ const btnBack = document.getElementById('btn-back');
 let map = null;
 let userMarker = null;
 let shelterMarker = null;
+let routingControl = null; // <--- NUOVO: Variabile per gestire la linea rossa del percorso
 
 let mapFocolai = null;
 let zoneLayer = null;
@@ -90,6 +91,8 @@ function resetMap() {
   if (!map) return;
   if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
   if (shelterMarker) { map.removeLayer(shelterMarker); shelterMarker = null; }
+  // <--- NUOVO: Rimuove la linea rossa precedente se esiste
+  if (routingControl) { map.removeControl(routingControl); routingControl = null; }
 }
 
 // Inizializza mappa vuota al caricamento della pagina
@@ -127,8 +130,11 @@ form.addEventListener('submit', async (e)=>{
     }
 
     const dati = json.dati_rifugio;
+    // Assicuriamoci che le coordinate siano numeri float
     const coordUserRaw = json.coordinate_utente || [];
     const coordShelterRaw = dati.posizione_rifugio || [];
+
+    // Convertiamo in float per sicurezza
     const coordUser = Array.isArray(coordUserRaw) ? coordUserRaw.map(Number) : [Number(coordUserRaw[0]), Number(coordUserRaw[1])];
     const coordShelter = Array.isArray(coordShelterRaw) ? coordShelterRaw.map(Number) : [Number(coordShelterRaw[0]), Number(coordShelterRaw[1])];
 
@@ -138,6 +144,7 @@ form.addEventListener('submit', async (e)=>{
       return;
     }
 
+    // Aggiornamento UI Testuale
     nomeEl.textContent = dati.nome;
     indirizzoRifugioEl.textContent = dati.indirizzo;
     distanzaEl.textContent = `Distanza: ${dati.distanza_km} km`;
@@ -155,12 +162,36 @@ form.addEventListener('submit', async (e)=>{
     resultSection.classList.remove('hidden');
     showFeedback('Risultato trovato.');
 
-    initMap(coordUser[0], coordUser[1], 12);
+    // -----------------------------------------------------
+    // LOGICA MAPPA E ROUTING (Linea Rossa)
+    // -----------------------------------------------------
+
+    // Resetta marker e percorsi vecchi
     resetMap();
-    userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
-    shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
-    const group = L.featureGroup([userMarker, shelterMarker]);
-    map.fitBounds(group.getBounds().pad(0.4));
+
+    // Centra mappa sull'utente inizialmente (verrà poi adattata dal routing)
+    initMap(coordUser[0], coordUser[1], 12);
+
+    // Aggiungi Marker Utente e Rifugio
+    userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu');
+    shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome).openPopup();
+
+    // <--- NUOVO: Calcolo e disegno del percorso stradale
+    routingControl = L.Routing.control({
+      waypoints: [
+        L.latLng(coordUser[0], coordUser[1]),
+        L.latLng(coordShelter[0], coordShelter[1])
+      ],
+      lineOptions: {
+        styles: [{ color: 'red', opacity: 0.7, weight: 5 }] // Stile: Linea Rossa spessa
+      },
+      show: false,             // Nasconde il box bianco con le istruzioni testuali
+      addWaypoints: false,     // Disabilita l'aggiunta di tappe trascinando
+      draggableWaypoints: false,
+      routeWhileDragging: false,
+      fitSelectedRoutes: true, // Adatta lo zoom per mostrare tutto il percorso
+      createMarker: function() { return null; } // Non creare marker duplicati (usiamo i nostri userMarker/shelterMarker)
+    }).addTo(map);
 
   } catch (err) {
     console.error('[NookPets] fetch error', err);
@@ -177,7 +208,7 @@ let acContainer = null;
 let acItems = [];
 let acSelected = -1;
 let acAbortController = null;
-const GEOCODE_CACHE = {}; // Cache locale semplice per evitare chiamate ripetute
+const GEOCODE_CACHE = {};
 
 if (indirizzoInput) {
   indirizzoInput.setAttribute('autocomplete', 'off');
@@ -231,7 +262,7 @@ function renderAutocomplete(items) {
 
     let displayText = typeof item === 'string' ? item : (item.display || item.name || '');
     let metaText = '';
-    
+
     if (item && typeof item === 'object') {
         if (item.postcode) metaText = `CAP: ${item.postcode}`;
         else if (item.city && item.state) metaText = `${item.city}, ${item.state}`;
@@ -292,7 +323,7 @@ async function selectAutocomplete(i) {
     try {
       showFeedback('Ricavo coordinate...', false, true);
       const res = await fetch('/api/geocode-street', {
-        method: 'POST', 
+        method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name: item.name, city: item.city, state: item.state, q: item.display})
       });
@@ -300,13 +331,13 @@ async function selectAutocomplete(i) {
         const j = await res.json();
         if (j.lat && j.lon) { lat = j.lat; lon = j.lon; }
       }
-    } catch(e) { console.warn('Geocode failed', e); } 
+    } catch(e) { console.warn('Geocode failed', e); }
     finally { showFeedback(''); }
   }
 
   if (lat && lon) {
     initMap(lat, lon, 14);
-    resetMap();
+    resetMap(); // Resetta anche eventuali percorsi vecchi
     userMarker = L.marker([lat, lon]).addTo(map).bindPopup('Posizione selezionata').openPopup();
   }
 }
@@ -383,7 +414,7 @@ function getAnimalTypeLabel(p) {
   return raw.charAt(0).toUpperCase() + raw.slice(1);
 }
 
-// 1. DEFINIZIONE LAYERS (Senza .addTo immediato)
+// 1. DEFINIZIONE LAYERS
 zoneLayer = L.geoJSON(null, {
   style: () => ({ color: '#6366f1', weight: 2, opacity: 0.8, fillOpacity: 0.1 }),
   onEachFeature: (feature, layer) => {
@@ -398,26 +429,24 @@ const visibleTypes = {};
 // 2. FUNZIONE INIZIALIZZAZIONE MAPPA FOCOLAI
 function initFocolaiMap() {
   if (mapFocolai) {
-    // Importante: forza il ricalcolo delle dimensioni quando la mappa passa da hidden a visible
     setTimeout(() => { mapFocolai.invalidateSize(); }, 100);
     return;
   }
 
   // Crea mappa
   mapFocolai = L.map('map-focolai').setView([34.0219, -118.4814], 10);
-  
+
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '© OpenStreetMap contributors'
   }).addTo(mapFocolai);
 
-  // Aggiungi subito il layer zone (vuoto o popolato dopo)
   zoneLayer.addTo(mapFocolai);
 }
 
 // 3. CARICAMENTO DATI (Fetch Zone + Animali)
 async function loadFocolai() {
   if (!mapFocolai) return;
-  
+
   try {
     showFeedback('Caricamento dati focolai...', false, true);
 
@@ -433,8 +462,7 @@ async function loadFocolai() {
     const respAnimali = await fetch('/api/geojson/animali_malati');
     if (respAnimali.ok) {
       const dataAnimali = await respAnimali.json();
-      
-      // Pulisci vecchio layer animali se esiste
+
       if (animaliLayer) mapFocolai.removeLayer(animaliLayer);
 
       animaliLayer = L.geoJSON(dataAnimali, {
@@ -448,8 +476,7 @@ async function loadFocolai() {
           const p = feature.properties;
           const tipo = getAnimalTypeLabel(p);
           const note = getProp(p, ['note', 'notes']) || '';
-          
-          // Memorizza tipo per filtro
+
           layer._tipo = tipo.toLowerCase();
 
           const content = `<div style="font-weight:bold">${tipo}</div>
@@ -458,16 +485,14 @@ async function loadFocolai() {
         }
       }).addTo(mapFocolai);
 
-      // Adatta zoom
       const group = L.featureGroup();
       if (zoneLayer.getLayers().length) group.addLayer(zoneLayer);
       if (animaliLayer.getLayers().length) group.addLayer(animaliLayer);
       if (group.getLayers().length) mapFocolai.fitBounds(group.getBounds().pad(0.2));
 
-      // Crea Legenda
       buildLegend(dataAnimali);
     }
-    
+
     showFeedback('');
 
   } catch (e) {
@@ -481,13 +506,11 @@ function updateAnimaliVisibility() {
   if (!animaliLayer) return;
   animaliLayer.eachLayer(layer => {
     const tipo = layer._tipo || 'sconosciuto';
-    const isVisible = visibleTypes[tipo] !== false; // Default true
-    
+    const isVisible = visibleTypes[tipo] !== false;
+
     if (isVisible) {
-       if (layer._origStyle) layer.setStyle(layer._origStyle); // Ripristina
-       else layer.setOpacity(1); 
-       // Nota: Leaflet circleMarker non ha setOpacity semplice per fill, 
-       // meglio reimpostare path style, ma per semplicità usiamo opacity o rimozione
+       if (layer._origStyle) layer.setStyle(layer._origStyle);
+       else layer.setOpacity(1);
        if (layer.getElement()) layer.getElement().style.display = '';
     } else {
        if (!layer._origStyle) layer._origStyle = { ...layer.options };
@@ -500,8 +523,7 @@ function toggleType(tipoRaw) {
   const tipo = tipoRaw.toLowerCase();
   visibleTypes[tipo] = !visibleTypes[tipo];
   updateAnimaliVisibility();
-  
-  // Aggiorna UI Legenda (opacity)
+
   const rows = legendFocolaiEl.querySelectorAll('.legend-row');
   rows.forEach(r => {
     if (r.dataset.type === tipo) {
@@ -516,7 +538,6 @@ function buildLegend(geoJson) {
   const typesFound = new Set();
   const sampleColors = {};
 
-  // Analizza i tipi presenti
   geoJson.features.forEach(f => {
     const t = getAnimalTypeLabel(f.properties).toLowerCase();
     typesFound.add(t);
@@ -527,18 +548,18 @@ function buildLegend(geoJson) {
   wrapper.className = 'legend-wrapper';
 
   typesFound.forEach(t => {
-    visibleTypes[t] = true; // init visibile
-    
+    visibleTypes[t] = true;
+
     const row = document.createElement('div');
     row.className = 'legend-row';
     row.dataset.type = t;
     row.style.cursor = 'pointer';
-    row.style.display = 'flex'; 
-    row.style.alignItems = 'center'; 
+    row.style.display = 'flex';
+    row.style.alignItems = 'center';
     row.style.marginRight = '10px';
 
     const colorBox = document.createElement('span');
-    colorBox.style.width = '16px'; 
+    colorBox.style.width = '16px';
     colorBox.style.height = '16px';
     colorBox.style.backgroundColor = sampleColors[t][0];
     colorBox.style.border = `2px solid ${sampleColors[t][1]}`;
@@ -551,11 +572,11 @@ function buildLegend(geoJson) {
 
     row.appendChild(colorBox);
     row.appendChild(label);
-    
+
     row.addEventListener('click', () => toggleType(t));
     wrapper.appendChild(row);
   });
-  
+
   legendFocolaiEl.appendChild(wrapper);
   legendFocolaiEl.classList.remove('hidden');
 }
@@ -564,28 +585,18 @@ function buildLegend(geoJson) {
 // GESTIONE CAMBIO VISTA (Home <-> Focolai)
 // ==========================================
 
-// Click su "Visualizza focolai"
 if (btnFocolai) {
   btnFocolai.addEventListener('click', () => {
-    // 1. Nascondi vista Home
     if (homeView) homeView.classList.add('hidden');
-    
-    // 2. Mostra vista Focolai
     if (mapFocolaiContainer) mapFocolaiContainer.classList.remove('hidden');
-    
-    // 3. Inizializza mappa e carica dati
     initFocolaiMap();
     loadFocolai();
   });
 }
 
-// Click su "Torna alla ricerca"
 if (btnBack) {
   btnBack.addEventListener('click', () => {
-    // 1. Nascondi focolai
     if (mapFocolaiContainer) mapFocolaiContainer.classList.add('hidden');
-    
-    // 2. Mostra home
     if (homeView) homeView.classList.remove('hidden');
   });
 }

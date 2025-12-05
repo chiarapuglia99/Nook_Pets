@@ -3,10 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Nook Pets - Trova Rifugio</title>
+  <title>Nook Pets</title>
+
+  <link rel="icon" href="../utils/icon.png" type="image/png">
+
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
   <link rel="stylesheet" href="/css/styles.css">
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
 </head>
 <body>
   <main class="container">
@@ -58,6 +65,7 @@
 
       <section id="map" class="map" aria-label="Mappa"></section>
     </div>
+
     <section id="map-focolai-container" class="map-focolai-container hidden">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <h2>Mappa Focolai</h2>
@@ -69,11 +77,12 @@
     </section>
 
     <footer class="footer">
-      <p>Creato con ❤️ per gli animali — immagini a scopo illustrativo</p>
+      <p>"Perché ogni strada dovrebbe portare a casa."</p>
+      <p>NookPets tutti i diritti riservati.</p>
+      <p>Progettato e sviluppato da Giuseppe Napolitano e Chiara Puglia.</p>
     </footer>
   </main>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="/app.js"></script>
 </body>
 </html>

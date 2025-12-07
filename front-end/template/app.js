@@ -25,18 +25,20 @@ const btnBack = document.getElementById('btn-back');
 let map = null;
 let userMarker = null;
 let shelterMarker = null;
-
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
 
+// --- NUOVA VARIABILE PER LA LINEA BLU ---
+let routingControl = null;
+
 // Pool immagini
 const animalMediaPool = [
-  'https://images.unsplash.com/photo-1543852786-1cf6624b9987?w=800&q=60&auto=format&fit=crop',
-  'https://images.unsplash.com/photo-1518717758536-85ae29035b6d?w=800&q=60&auto=format&fit=crop',
-  'https://media.giphy.com/media/3o6Zt8MgUuvSbkZYWc/giphy.gif',
-  'https://media.giphy.com/media/26BRuo6sLetdllPAQ/giphy.gif',
-  'https://images.unsplash.com/photo-1518020382113-a7e8fc38eac9?w=800&q=60&auto=format&fit=crop'
+  '../utils/doggie.gif',
+  '../utils/funny_cat.gif',
+  '../utils/parrot.gif',
+  '../utils/rabbit.gif',
+  '../utils/all_normal.gif'
 ];
 
 // ==========================================
@@ -51,7 +53,8 @@ function showFeedback(msg, isError=false, withSpinner=false) {
   feedback.style.color = isError ? '#c53030' : '#374151';
   if (withSpinner) {
     if (!document.querySelector('.spinner')) {
-      const s = document.createElement('span'); s.className = 'spinner'; feedback.appendChild(s);
+      const s = document.createElement('span');
+      s.className = 'spinner'; feedback.appendChild(s);
     }
   } else {
     const s = document.querySelector('.spinner');
@@ -87,6 +90,12 @@ function resetMap() {
   if (!map) return;
   if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
   if (shelterMarker) { map.removeLayer(shelterMarker); shelterMarker = null; }
+
+  // --- NUOVO: Rimuove la vecchia linea se esiste ---
+  if (routingControl) {
+      map.removeControl(routingControl);
+      routingControl = null;
+  }
 }
 
 // Inizializza mappa vuota
@@ -141,10 +150,28 @@ form.addEventListener('submit', async (e)=>{
 
     initMap(coordUser[0], coordUser[1], 12);
     resetMap();
+
+    // Creazione Marker Standard
     userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
     shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
     const group = L.featureGroup([userMarker, shelterMarker]);
     map.fitBounds(group.getBounds().pad(0.4));
+
+    // --- NUOVA FUNZIONALITA': LINEA BLU STILE GOOGLE MAPS ---
+    routingControl = L.Routing.control({
+      waypoints: [
+        L.latLng(coordUser[0], coordUser[1]),
+        L.latLng(coordShelter[0], coordShelter[1])
+      ],
+      lineOptions: {
+        styles: [{ color: '#0066ff', opacity: 0.8, weight: 6 }] // Linea blu spessa
+      },
+      createMarker: function() { return null; }, // Niente marker doppi
+      addWaypoints: false,      // Disabilita modifica percorso
+      draggableWaypoints: false,
+      fitSelectedRoutes: false, // Evita zoom automatici fastidiosi
+      show: false               // Nasconde il pannello controlli (gestito anche via CSS)
+    }).addTo(map);
 
   } catch (err) {
     console.error(err);
@@ -244,7 +271,6 @@ async function selectAutocomplete(i) {
   if (!acItems[i]) return;
   const item = acItems[i]._ac_item;
   if (!item) return;
-
   const val = typeof item === 'string' ? item : (item.display || item.name);
   indirizzoInput.value = val;
   if (item.postcode && !val.includes(item.postcode)) {
@@ -257,7 +283,6 @@ async function selectAutocomplete(i) {
   // Geocodifica on demand
   let lat = item.lat != null ? Number(item.lat) : null;
   let lon = item.lon != null ? Number(item.lon) : null;
-
   if ((lat == null || lon == null) && typeof item === 'object') {
     try {
       showFeedback('Ricavo coordinate...', false, true);
@@ -317,7 +342,6 @@ const TYPE_PALETTE = {
   'rabbit': ['#a855f7', '#581c87'],  // Viola Chiaro, Viola Scuro
   'other': ['#6b7280', '#1f2937']    // Grigio Chiaro, Grigio Scuro
 };
-
 const visibleTypes = {};
 
 // Helper Robusto per Shapefile (trova chiavi troncate)
@@ -372,7 +396,6 @@ async function loadFocolai() {
     if (resAnim.ok) {
         const data = await resAnim.json();
         if (animaliLayer) mapFocolai.removeLayer(animaliLayer);
-
         animaliLayer = L.geoJSON(data, {
             pointToLayer: (feature, latlng) => {
                 const info = getAnimalInfo(feature.properties);
@@ -413,12 +436,10 @@ async function loadFocolai() {
         });
 
         animaliLayer.addTo(mapFocolai);
-
         // Auto-Zoom
         const bounds = zoneLayer.getBounds();
         if(animaliLayer.getLayers().length > 0) bounds.extend(animaliLayer.getBounds());
         if (bounds.isValid()) mapFocolai.fitBounds(bounds.pad(0.1));
-
         buildLegend();
     }
     showFeedback('');
@@ -480,7 +501,6 @@ function buildLegend() {
         const txt = document.createElement('span');
         txt.textContent = labelTxt;
         txt.style.fontSize = '0.9rem';
-
         row.appendChild(dot);
         row.appendChild(txt);
         row.onclick = () => toggleType(key);

@@ -326,9 +326,10 @@ def _serve_geojson_safe(filename: str):
         return jsonify({'error': f'Unable to read file: {e}'}), 500
 
 
-@app.route('/api/geojson/zone_pericolose')
-def api_zone_pericolose():
-    return _serve_geojson_safe('zone_pericolose.geojson')
+@app.route('/api/geojson/zone_rosse')
+def api_zone_rosse():
+    # Assicurati che il file 'zone_rosse.geojson' sia nella cartella 'animali_qgis/geojson'
+    return _serve_geojson_safe('zone_rosse.geojson')
 
 
 @app.route('/api/geojson/animali_malati')

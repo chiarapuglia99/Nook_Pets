@@ -1,0 +1,8 @@
+{
+"type": "FeatureCollection",
+"name": "zone_rosse",
+"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:EPSG::32611" } },
+"features": [
+{ "type": "Feature", "properties": { "fid": 1, "MEAN_X": -118.09278820673597, "MEAN_Y": 33.757876624749606, "CLUSTER_ID": null }, "geometry": { "type": "Point", "coordinates": [ -118.09278820673596, 33.757876624749606 ] } }
+]
+}

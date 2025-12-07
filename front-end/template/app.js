@@ -28,8 +28,9 @@ let shelterMarker = null;
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
+let centriFocolaiLayer = null; // Variabile per i centri (Zone Rosse)
 
-// --- NUOVA VARIABILE PER LA LINEA BLU ---
+// Variabile per il controllo del percorso (Linea Blu)
 let routingControl = null;
 
 // Pool immagini
@@ -48,13 +49,15 @@ function pickRandomMedia() {
   return animalMediaPool[Math.floor(Math.random() * animalMediaPool.length)];
 }
 
-function showFeedback(msg, isError=false, withSpinner=false) {
+function showFeedback(msg, isError = false, withSpinner = false) {
   feedback.textContent = msg;
   feedback.style.color = isError ? '#c53030' : '#374151';
+
   if (withSpinner) {
     if (!document.querySelector('.spinner')) {
       const s = document.createElement('span');
-      s.className = 'spinner'; feedback.appendChild(s);
+      s.className = 'spinner';
+      feedback.appendChild(s);
     }
   } else {
     const s = document.querySelector('.spinner');
@@ -72,14 +75,22 @@ function setButtonLoading(loading) {
   }
 }
 
+// Funzione globale per copiare le coordinate (chiamata dai popup HTML)
+window.copiaCoordinate = function(lat, lng) {
+    navigator.clipboard.writeText(`${lat}, ${lng}`).then(() => {
+        alert("Coordinate copiate negli appunti!");
+    });
+};
+
 // ==========================================
 // LOGICA MAPPA PRINCIPALE (RICERCA)
 // ==========================================
-function initMap(lat=34.0219, lng=-118.4814, zoom=10) {
+function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
   if (!map) {
     map = L.map('map').setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '© OpenStreetMap contributors'
+      maxZoom: 19,
+      attribution: '© OpenStreetMap contributors'
     }).addTo(map);
   } else {
     map.setView([lat, lng], zoom);
@@ -90,20 +101,14 @@ function resetMap() {
   if (!map) return;
   if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
   if (shelterMarker) { map.removeLayer(shelterMarker); shelterMarker = null; }
-
-  // --- NUOVO: Rimuove la vecchia linea se esiste ---
-  if (routingControl) {
-      map.removeControl(routingControl);
-      routingControl = null;
-  }
+  if (routingControl) { map.removeControl(routingControl); routingControl = null; }
 }
 
-// Inizializza mappa vuota
 initMap();
 animalImg.src = pickRandomMedia();
 
 // Handler Form
-form.addEventListener('submit', async (e)=>{
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const indirizzo = indirizzoInput.value.trim();
   if (!indirizzo) { showFeedback('Inserisci un indirizzo valido.', true); return; }
@@ -114,7 +119,8 @@ form.addEventListener('submit', async (e)=>{
 
   try {
     const resp = await fetch('/api/nearest', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ indirizzo })
     });
 
@@ -129,7 +135,6 @@ form.addEventListener('submit', async (e)=>{
     const coordUserRaw = json.coordinate_utente || [];
     const coordShelterRaw = dati.posizione_rifugio || [];
 
-    // Normalizzazione coordinate
     const coordUser = Array.isArray(coordUserRaw) ? coordUserRaw.map(Number) : [Number(coordUserRaw[0]), Number(coordUserRaw[1])];
     const coordShelter = Array.isArray(coordShelterRaw) ? coordShelterRaw.map(Number) : [Number(coordShelterRaw[0]), Number(coordShelterRaw[1])];
 
@@ -151,26 +156,18 @@ form.addEventListener('submit', async (e)=>{
     initMap(coordUser[0], coordUser[1], 12);
     resetMap();
 
-    // Creazione Marker Standard
     userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
     shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
+
     const group = L.featureGroup([userMarker, shelterMarker]);
     map.fitBounds(group.getBounds().pad(0.4));
 
-    // --- NUOVA FUNZIONALITA': LINEA BLU STILE GOOGLE MAPS ---
+    // Aggiunta Routing Machine (Linea Blu)
     routingControl = L.Routing.control({
-      waypoints: [
-        L.latLng(coordUser[0], coordUser[1]),
-        L.latLng(coordShelter[0], coordShelter[1])
-      ],
-      lineOptions: {
-        styles: [{ color: '#0066ff', opacity: 0.8, weight: 6 }] // Linea blu spessa
-      },
-      createMarker: function() { return null; }, // Niente marker doppi
-      addWaypoints: false,      // Disabilita modifica percorso
-      draggableWaypoints: false,
-      fitSelectedRoutes: false, // Evita zoom automatici fastidiosi
-      show: false               // Nasconde il pannello controlli (gestito anche via CSS)
+      waypoints: [L.latLng(coordUser[0], coordUser[1]), L.latLng(coordShelter[0], coordShelter[1])],
+      lineOptions: { styles: [{ color: '#0066ff', opacity: 0.8, weight: 6 }] },
+      createMarker: function() { return null; },
+      addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: false, show: false
     }).addTo(map);
 
   } catch (err) {
@@ -182,7 +179,7 @@ form.addEventListener('submit', async (e)=>{
 });
 
 // ==========================================
-// LOGICA AUTOCOMPLETE (Da Versione 1)
+// LOGICA AUTOCOMPLETE
 // ==========================================
 let acContainer = null;
 let acItems = [];
@@ -228,9 +225,7 @@ function renderAutocomplete(items) {
   items.forEach((item, idx) => {
     const el = document.createElement('div');
     el.className = 'ac-item';
-    Object.assign(el.style, {
-        padding: '8px 10px', cursor: 'pointer', borderRadius: '6px', margin: '2px 0'
-    });
+    Object.assign(el.style, { padding: '8px 10px', cursor: 'pointer', borderRadius: '6px', margin: '2px 0' });
 
     let displayText = typeof item === 'string' ? item : (item.display || item.name || '');
     let metaText = '';
@@ -243,7 +238,6 @@ function renderAutocomplete(items) {
     const title = document.createElement('div');
     title.textContent = displayText;
     title.style.fontWeight = '600'; title.style.fontSize = '0.95rem';
-
     el.appendChild(title);
     if (metaText) {
       const sub = document.createElement('div');
@@ -280,7 +274,6 @@ async function selectAutocomplete(i) {
   clearAutocomplete();
   indirizzoInput.focus();
 
-  // Geocodifica on demand
   let lat = item.lat != null ? Number(item.lat) : null;
   let lon = item.lon != null ? Number(item.lon) : null;
   if ((lat == null || lon == null) && typeof item === 'object') {
@@ -332,19 +325,18 @@ window.addEventListener('resize', positionAutocomplete);
 createAutocomplete();
 
 // ==========================================
-// LOGICA FOCOLAI - VERSIONE AVANZATA (V2)
+// LOGICA FOCOLAI - VERSIONE AVANZATA
 // ==========================================
 
 const TYPE_PALETTE = {
-  'dog': ['#ef4444', '#991b1b'],     // Rosso Chiaro, Rosso Scuro
-  'cat': ['#3b82f6', '#1e3a8a'],     // Blu Chiaro, Blu Scuro
-  'bird': ['#eab308', '#854d0e'],    // Giallo, Marrone
-  'rabbit': ['#a855f7', '#581c87'],  // Viola Chiaro, Viola Scuro
-  'other': ['#6b7280', '#1f2937']    // Grigio Chiaro, Grigio Scuro
+  'dog': ['#ef4444', '#991b1b'],     // Rosso
+  'cat': ['#3b82f6', '#1e3a8a'],     // Blu
+  'bird': ['#eab308', '#854d0e'],    // Giallo
+  'rabbit': ['#a855f7', '#581c87'],  // Viola
+  'other': ['#6b7280', '#1f2937']    // Grigio
 };
 const visibleTypes = {};
 
-// Helper Robusto per Shapefile (trova chiavi troncate)
 function getVal(props, keys) {
     if (!props) return null;
     const propKeys = Object.keys(props);
@@ -381,17 +373,22 @@ function initFocolaiMap() {
   zoneLayer.addTo(mapFocolai);
 }
 
+// =======================================================
+// CARICAMENTO FOCOLAI (Zone, Animali, e Centri Zone Rosse)
+// =======================================================
 async function loadFocolai() {
   if (!mapFocolai) return;
-  showFeedback('Carico database animali...', false, true);
+  showFeedback('Carico analisi focolai...', false, true);
+
   try {
-    // 1. Zone
+    // 1. Zone Pericolose
     const resZone = await fetch('/api/geojson/zone_pericolose');
     if (resZone.ok) {
         zoneLayer.clearLayers();
         zoneLayer.addData(await resZone.json());
     }
-    // 2. Animali
+
+    // 2. Animali Malati
     const resAnim = await fetch('/api/geojson/animali_malati');
     if (resAnim.ok) {
         const data = await resAnim.json();
@@ -409,7 +406,6 @@ async function loadFocolai() {
                 const info = getAnimalInfo(p);
                 layer._tipoKey = info.key;
 
-                // Recupero dati robusto
                 const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
                 const nome = (rawName.toLowerCase() === 'unknown' || rawName.trim() === '') ? "Senza nome" : rawName;
                 const condizione = getVal(p, ['Intake Con', 'Intake Condition', 'Intake_Condition', 'condition']) || "Non specificato";
@@ -426,8 +422,7 @@ async function loadFocolai() {
                             <div style="margin-bottom:6px;">
                                 <b>Salute:</b> <span style="color:#c53030; background:#fee2e2; padding:2px 5px; border-radius:4px; font-weight:bold;">${condizione}</span>
                             </div>
-                            <div style="color:#666; margin-bottom:2px;"><b>Colore Primario:</b> ${colPrimario}</div>
-                            <div style="color:#666;"><b>Colore Secondario:</b> ${colSecondario}</div>
+                            <div style="color:#666; margin-bottom:2px;"><b>Colore:</b> ${colPrimario} / ${colSecondario}</div>
                         </div>
                     </div>
                 `;
@@ -436,16 +431,83 @@ async function loadFocolai() {
         });
 
         animaliLayer.addTo(mapFocolai);
+
         // Auto-Zoom
         const bounds = zoneLayer.getBounds();
         if(animaliLayer.getLayers().length > 0) bounds.extend(animaliLayer.getBounds());
         if (bounds.isValid()) mapFocolai.fitBounds(bounds.pad(0.1));
+
         buildLegend();
     }
+
+    // 3. --- CARICAMENTO CENTRI FOCOLAI (GESTIONE NULL) ---
+    const resCentri = await fetch('/api/geojson/zone_rosse');
+    if (resCentri.ok) {
+        const dataCentri = await resCentri.json();
+
+        // Rimuovi layer precedente
+        if (centriFocolaiLayer) mapFocolai.removeLayer(centriFocolaiLayer);
+
+        // Inizializza un contatore per i focolai senza ID
+        let unknownCounter = 1;
+
+        centriFocolaiLayer = L.geoJSON(dataCentri, {
+            pointToLayer: (feature, latlng) => {
+                return L.circleMarker(latlng, {
+                    radius: 15,
+                    fillColor: '#ff0000',
+                    color: '#000',
+                    weight: 2,
+                    opacity: 1,
+                    fillOpacity: 0.5
+                });
+            },
+            onEachFeature: (feature, layer) => {
+                const props = feature.properties;
+                // Coordinate per visualizzazione e copia
+                const lat = feature.geometry.coordinates[1].toFixed(5);
+                const lng = feature.geometry.coordinates[0].toFixed(5);
+
+                // --- LOGICA GESTIONE ID NULL ---
+                // Cerca l'ID tra le possibili chiavi
+                const rawId = getVal(props, ['CLUSTER_ID', 'cluster_id', 'id', 'ID']);
+
+                let displayTitle = "";
+
+                if (rawId !== null && rawId !== undefined && rawId !== "") {
+                    // Se l'ID esiste, usalo
+                    displayTitle = `⚠️ FOCOLAIO ${rawId}`;
+                } else {
+                    // Se è null, usa un numero progressivo generato da noi
+                    displayTitle = `ZONA ROSSA #${unknownCounter++}`;
+                }
+                // -------------------------------
+
+                const popupContent = `
+                    <div style="text-align:center; min-width:150px;">
+                        <h3 style="margin:0; color:#dc2626; font-family:'Fredoka', sans-serif;">${displayTitle}</h3>
+                        <p style="font-size:0.9rem; margin:5px 0;">Alta concentrazione rilevata.</p>
+                        <div style="background:#f3f4f6; padding:5px; border-radius:4px; font-family:monospace; font-weight:bold;">
+                            LAT: ${lat}<br>
+                            LON: ${lng}
+                        </div>
+                        <button onclick="copiaCoordinate(${lat}, ${lng})" style="margin-top:5px; font-size:0.8rem; cursor:pointer;">
+                            Copia Coordinate
+                        </button>
+                    </div>
+                `;
+                layer.bindPopup(popupContent);
+            }
+        });
+
+        centriFocolaiLayer.addTo(mapFocolai);
+        centriFocolaiLayer.bringToFront();
+    }
+
     showFeedback('');
   } catch (e) {
     console.error(e);
-    showFeedback('Errore caricamento focolai.', true);
+    showFeedback('Errore caricamento dati focolai.', true);
   }
 }
 
@@ -516,6 +578,7 @@ if (btnFocolai) btnFocolai.onclick = () => {
     initFocolaiMap();
     loadFocolai();
 };
+
 if (btnBack) btnBack.onclick = () => {
     mapFocolaiContainer.classList.add('hidden');
     homeView.classList.remove('hidden');

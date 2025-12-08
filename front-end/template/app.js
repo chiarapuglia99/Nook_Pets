@@ -28,10 +28,14 @@ let shelterMarker = null;
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
-let centriFocolaiLayer = null; // Variabile per i centri (Zone Rosse)
+let centriFocolaiLayer = null;
 
 // Variabile per il controllo del percorso (Linea Blu)
 let routingControl = null;
+
+// *** FIX GLOBALE: Timer per l'animazione randagi ***
+// Necessario per poterlo fermare quando si cambia pagina
+let randagiGlobalTimer = null;
 
 // Pool immagini
 const animalMediaPool = [
@@ -413,7 +417,7 @@ async function loadFocolai() {
 
   try {
     // 1. Zone Pericolose
-    const resZone = await fetch('/api/geojson/zone_pericolose');
+    const resZone = await fetch('/api/geojson/zone_rosse');
     if (resZone.ok) {
         zoneLayer.clearLayers();
         zoneLayer.addData(await resZone.json());
@@ -630,10 +634,18 @@ function buildLegend() {
     legendFocolaiEl.classList.remove('hidden');
 }
 
-// Gestione Navigazione
+// Gestione Navigazione: Tasto per andare alla vista Focolai
 if (btnFocolai) btnFocolai.onclick = () => {
     homeView.classList.add('hidden');
+
+    // *** FIX: Nascondi esplicitamente la vista Randagi ***
+    if (randagiContainer) randagiContainer.classList.add('hidden');
+
     mapFocolaiContainer.classList.remove('hidden');
+
+    // *** FIX: Distruggi completamente l'ambiente randagi (ferma timer) ***
+    destroyRandagiMap();
+
     initFocolaiMap();
     loadFocolai();
 };
@@ -641,6 +653,8 @@ if (btnFocolai) btnFocolai.onclick = () => {
 if (btnBack) btnBack.onclick = () => {
     mapFocolaiContainer.classList.add('hidden');
     homeView.classList.remove('hidden');
+    // distruggi focolai quando torni
+    destroyFocolaiMap();
 };
 
 // =========================
@@ -674,28 +688,80 @@ function initRandagiMap(lat = 34.0219, lng = -118.4814, zoom = 11) {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapRandagi);
 }
 
-// Modifica loadRandagiData: dopo la costruzione dei grafici aggiungiamo i marker sulla mappa
+// *** FIX: Funzione per distruggere mappa randagi e PULIRE TUTTO ***
+function destroyRandagiMap() {
+    try {
+        // 1. FERMA IL TIMER GLOBALE (Fix fondamentale)
+        if (randagiGlobalTimer) {
+            clearInterval(randagiGlobalTimer);
+            randagiGlobalTimer = null;
+        }
+
+        // 2. RIMUOVI ELEMENTI UI
+        const controls = document.getElementById('randagi-anim-controls');
+        if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
+        const label = document.getElementById('randagi-anim-label');
+        if (label && label.parentNode) label.parentNode.removeChild(label);
+        const table = document.getElementById('randagi-table-container');
+        if (table && table.parentNode) table.parentNode.removeChild(table);
+
+        // Pulizia legenda specifica
+        const leg = document.getElementById('randagi-legend');
+        if (leg) leg.remove();
+
+        // 3. PULIZIA LAYER E MAPPA
+        if (animatedLayerGroup) {
+            try { animatedLayerGroup.clearLayers(); } catch (e) {}
+            animatedLayerGroup = null;
+        }
+        if (mapRandagi) {
+            mapRandagi.remove();
+            mapRandagi = null;
+        }
+
+        // 4. NASCONDI IL CONTENITORE HTML (Fix visuale)
+        if (randagiContainer) {
+            randagiContainer.classList.add('hidden');
+        }
+
+    } catch (e) { console.warn('destroyRandagiMap error', e); }
+}
+
+// Funzione per distruggere la mappa focolai
+function destroyFocolaiMap() {
+    try {
+        if (mapFocolai) {
+            // rimuovi layers e mappa
+            if (zoneLayer) try { zoneLayer.clearLayers(); } catch (e) {}
+            if (animaliLayer) try { animaliLayer.clearLayers(); } catch (e) {}
+            if (centriFocolaiLayer) try { centriFocolaiLayer.clearLayers(); } catch (e) {}
+            mapFocolai.remove();
+            mapFocolai = null;
+        }
+    } catch (e) { console.warn('destroyFocolaiMap error', e); }
+}
+
+// Modifica loadRandagiData: salva i dati in window.randagiBuckets per il reset
 async function loadRandagiData() {
     showRandagiFeedback('Caricamento dati randagi...', false);
     try {
-        // Richiesta con cache-buster per evitare 304 Not Modified e forzare il server a restituire il corpo
+        // Richiesta con cache-buster
         const res = await fetch(`/api/geojson/animali_randagi?_=${Date.now()}`);
-         if (!res.ok) { throw new Error('Impossibile caricare animali randagi'); }
-         const data = await res.json();
+        if (!res.ok) { throw new Error('Impossibile caricare animali randagi'); }
+        const data = await res.json();
 
-         // Se il server restituisce un FeatureCollection vuoto, informiamo l'utente e terminiamo
-         if (data && data.type === 'FeatureCollection' && Array.isArray(data.features) && data.features.length === 0) {
+        // Se vuoto
+        if (data && data.type === 'FeatureCollection' && Array.isArray(data.features) && data.features.length === 0) {
             showRandagiFeedback('Nessun dato per animali randagi trovato (file mancante o vuoto).', true);
             return;
-         }
+        }
 
-         // Conteggi per sesso e tipo
-         const countsSesso = { 'Male': 0, 'Female': 0, 'Unknown': 0 };
-         const countsTipo = {};
-         // Conteggi ritrovamenti raggruppati per mese (YYYY-MM)
-         const countsRitrovamenti = {};
-         // Bucket mensili: mappa monthKey -> array di feature
-         const monthBuckets = {};
+        buildRandagiTable(data.features || []);
+
+        // Conteggi
+        const countsSesso = { 'Male': 0, 'Female': 0, 'Unknown': 0 };
+        const countsTipo = {};
+        const monthBuckets = {};
 
         (data.features || []).forEach(f => {
             const p = f.properties || {};
@@ -708,7 +774,7 @@ async function loadRandagiData() {
 
             countsSesso[s] = (countsSesso[s] || 0) + 1;
 
-            // Estrai tipo (species) e aggiorna countsTipo
+            // Estrai tipo
             let t = (p.species || p.type || p.animal_type || p['Animal Type'] || p['Animal Typ'] || '').toString().trim().toLowerCase();
             if (!t) t = (p['Animal Typ'] || p['Animal T_3'] || '').toString().trim().toLowerCase();
             if (!t) t = 'other';
@@ -719,55 +785,49 @@ async function loadRandagiData() {
             else t = 'other';
             countsTipo[t] = (countsTipo[t] || 0) + 1;
 
-             // Estrai la data di ritrovamento e raggruppa per mese (YYYY-MM)
-             let rawDate = getVal(p, ['Intake Dat', 'intake_date', 'intake date', 'intake_datetime', 'intake_time', 'intake', 'found_date', 'date_found', 'Date', 'datetime', 'ritrovamento']) || '';
-             let monthKey = 'Unknown';
-             if (rawDate) {
-                 try {
-                     const d = new Date(String(rawDate));
-                     if (!isNaN(d.getTime())) {
-                         const y = d.getUTCFullYear();
-                         const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-                         monthKey = `${y}-${m}`;
-                     } else {
-                         const m = String(rawDate).match(/(\d{4}-\d{2})/);
-                         if (m && m[1]) monthKey = m[1];
-                     }
-                 } catch (err) { monthKey = 'Unknown'; }
-             }
-             countsRitrovamenti[monthKey] = (countsRitrovamenti[monthKey] || 0) + 1;
-             if (!monthBuckets[monthKey]) monthBuckets[monthKey] = [];
-             monthBuckets[monthKey].push(f);
-         });
+            // Estrai la data
+            let rawDate = getVal(p, ['Intake Dat', 'intake_date', 'intake date', 'intake_datetime', 'intake_time', 'intake', 'found_date', 'date_found', 'Date', 'datetime', 'ritrovamento']) || '';
+            let monthKey = 'Unknown';
+            if (rawDate) {
+                try {
+                    const d = new Date(String(rawDate));
+                    if (!isNaN(d.getTime())) {
+                        const y = d.getUTCFullYear();
+                        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+                        monthKey = `${y}-${m}`;
+                    } else {
+                        const m = String(rawDate).match(/(\d{4}-\d{2})/);
+                        if (m && m[1]) monthKey = m[1];
+                    }
+                } catch (err) { monthKey = 'Unknown'; }
+            }
+            if (!monthBuckets[monthKey]) monthBuckets[monthKey] = [];
+            monthBuckets[monthKey].push(f);
+        });
 
-         // Costruiamo il grafico pie per il sesso (ora con etichette italiane e tooltip con percentuali)
-         buildRandagiCharts(countsSesso);
+        buildRandagiCharts(countsSesso);
+        initRandagiMap();
 
-          // Inizializza mappa se necessario
-          initRandagiMap();
+        if (randagiLayer && mapRandagi) { mapRandagi.removeLayer(randagiLayer); randagiLayer = null; }
 
-          // Rimuovi layer precedente se presente
-          if (randagiLayer && mapRandagi) { mapRandagi.removeLayer(randagiLayer); randagiLayer = null; }
-
-        // Costruisci legenda specie nella vista randagi (countsTipo calcolato sopra)
         buildRandagiLegend(countsTipo);
 
-         // Avvia l'animazione mese-per-mese usando i monthBuckets
-         animateRandagiByMonth(monthBuckets);
+        // *** FIX: SALVATAGGIO GLOBALE PER RESET ***
+        window.randagiBuckets = monthBuckets;
 
-          showRandagiFeedback('');
-     } catch (e) {
-         console.error(e);
-         showRandagiFeedback('Errore nel caricamento dei dati randagi.', true);
-     }
- }
+        animateRandagiByMonth(monthBuckets);
+
+        showRandagiFeedback('');
+    } catch (e) {
+        console.error(e);
+        showRandagiFeedback('Errore nel caricamento dei dati randagi.', true);
+    }
+}
 
 
 function buildRandagiCharts(countsSesso) {
-     // Pie chart sesso
      const pieCtx = document.getElementById('randagi-pie').getContext('2d');
      const rawLabels = Object.keys(countsSesso);
-     // Mappa etichette in italiano
      const labelMap = { 'Male': 'Maschio', 'Female': 'Femmina', 'Unknown': 'Sconosciuto' };
      const pieLabels = rawLabels.map(l => labelMap[l] || l);
      const pieData = rawLabels.map(l => countsSesso[l]);
@@ -799,7 +859,6 @@ function buildRandagiCharts(countsSesso) {
      });
  }
 
-// Nuova funzione: costruisce la legenda delle specie per la vista randagi
  function buildRandagiLegend(countsTipo) {
     if (!randagiContainer) return;
     let legend = document.getElementById('randagi-legend');
@@ -830,7 +889,95 @@ function buildRandagiCharts(countsSesso) {
     });
 }
 
-// Funzione che anima l'apparizione dei randagi mese per mese sulla mappa
+function buildRandagiTable(features) {
+    if (!randagiContainer) return;
+    let existing = document.getElementById('randagi-table-container');
+    if (existing) existing.remove();
+
+    const container = document.createElement('div');
+    container.id = 'randagi-table-container';
+    Object.assign(container.style, { marginTop: '12px', background: '#fff', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' });
+
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    table.innerHTML = `<thead><tr><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Specie</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Data</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Coordinate</th></tr></thead>`;
+
+    const tbody = document.createElement('tbody');
+    const seen = new Set();
+    (features || []).forEach(f => {
+        try {
+            const p = f.properties || {};
+            const geom = f.geometry || {};
+            let id = getVal(p, ['id','ID','Id','objectid','OBJECTID']);
+            let name = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || '';
+            let date = getVal(p, ['Intake Dat','intake_date','date_found','found_date','Date','datetime','ritrovamento']) || '';
+            const coords = extractCoords(geom) || [];
+            const coordStr = coords.length >= 2 ? `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}` : '';
+            const key = id ? String(id) : `${String(name).trim().toLowerCase()}|${String(date).trim()}|${coordStr}`;
+            if (seen.has(key)) return; seen.add(key);
+
+            const specieRaw = getVal(p, ['species','type','animal_type','Animal Type','Animal Typ']) || '';
+            let specie = (specieRaw || '').toString().toLowerCase();
+            if (specie.includes('dog') || specie.includes('cane')) specie = 'Cane';
+            else if (specie.includes('cat') || specie.includes('gatto')) specie = 'Gatto';
+            else if (specie.includes('bird') || specie.includes('uccello')) specie = 'Uccello';
+            else if (specie.includes('rabbit') || specie.includes('coniglio')) specie = 'Coniglio';
+            else specie = 'Altro';
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td style="padding:6px; border-bottom:1px solid #f3f3f3">${name || 'Senza nome'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${specie}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${date || '-'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${coordStr || '-'}</td>`;
+            tbody.appendChild(tr);
+        } catch (e) { /* ignore row errors */ }
+    });
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset caricamento';
+    Object.assign(resetBtn.style, { marginTop: '8px', padding: '8px 10px', borderRadius: '8px', cursor: 'pointer', border: 'none', background: '#ef4444', color: '#fff' });
+    resetBtn.onclick = () => {
+        resetRandagiLoading();
+    };
+    container.appendChild(resetBtn);
+
+    randagiContainer.appendChild(container);
+}
+
+// Reset dell'animazione
+function resetRandagiLoading() {
+    try {
+        // 1. Ferma tutto e pulisci
+        const play = document.getElementById('randagi-play');
+        const pause = document.getElementById('randagi-pause');
+        if (play) play.disabled = false;
+        if (pause) pause.disabled = true;
+
+        if (animatedLayerGroup) {
+            try { animatedLayerGroup.clearLayers(); } catch (e) {}
+            if (mapRandagi && mapRandagi.hasLayer(animatedLayerGroup)) mapRandagi.removeLayer(animatedLayerGroup);
+            animatedLayerGroup = null;
+        }
+
+        const controls = document.getElementById('randagi-anim-controls');
+        if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
+        const label = document.getElementById('randagi-anim-label');
+        if (label && label.parentNode) label.parentNode.removeChild(label);
+
+        // 2. --- FIX: Se abbiamo i dati, ricostruiamo l'interfaccia in pausa ---
+        if (window.randagiBuckets) {
+            showRandagiFeedback('Animazione resettata. Premi Play per iniziare.');
+            // Rilanciamo la funzione passando "autoStart: false"
+            animateRandagiByMonth(window.randagiBuckets, { speedPct: 50, autoStart: false });
+        } else {
+            showRandagiFeedback('Caricamento resettato.');
+        }
+
+    } catch (e) { console.warn('resetRandagiLoading error', e); }
+}
+
+// Funzione che anima l'apparizione dei randagi
 function animateRandagiByMonth(monthBuckets, opts = {}) {
     if (!mapRandagi) return;
     // pulisci layer precedente
@@ -861,141 +1008,171 @@ function animateRandagiByMonth(monthBuckets, opts = {}) {
     if (!controlsEl) {
         controlsEl = document.createElement('div');
         controlsEl.id = 'randagi-anim-controls';
-        Object.assign(controlsEl.style, { position: 'absolute', top: '50px', right: '10px', padding: '8px', background: 'rgba(255,255,255,0.95)', borderRadius: '10px', zIndex: 1000, display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 6px 20px rgba(15,23,42,0.12)' });
-        const btnPlay = document.createElement('button'); btnPlay.id = 'randagi-play'; btnPlay.innerHTML = '▶️&nbsp;<span style="font-weight:600;">Play</span>';
-        const btnPause = document.createElement('button'); btnPause.id = 'randagi-pause'; btnPause.innerHTML = '⏸️&nbsp;<span style="font-weight:600;">Pausa</span>';
-        const speed = document.createElement('input'); speed.type = 'range'; speed.min = '200'; speed.max = '2000'; speed.step = '100'; speed.value = String(opts.intervalMs || 900);
-        speed.title = 'Velocità (ms)';
-        // Style buttons to look nicer
-        [btnPlay, btnPause].forEach(b => {
-            b.style.padding = '8px 12px';
-            b.style.border = 'none';
-            b.style.background = 'linear-gradient(180deg,#ffffff,#f3f4f6)';
-            b.style.borderRadius = '8px';
-            b.style.cursor = 'pointer';
-            b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)';
-            b.style.fontSize = '0.95rem';
-        });
-        btnPlay.style.color = '#065f46';
-        btnPause.style.color = '#7f1d1d';
-        controlsEl.appendChild(btnPlay); controlsEl.appendChild(btnPause); controlsEl.appendChild(speed);
-         mapRandagi.getContainer().appendChild(controlsEl);
+        Object.assign(controlsEl.style, { position: 'absolute', top: '50px', right: '10px', padding: '8px', background: 'rgba(255,255,255,0.95)', borderRadius: '10px', zIndex: 1000, display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 6px 20px rgba(15,23,42,0.12)', flexDirection: 'column', minWidth: '180px' });
 
-         // Impostazioni iniziali pulsanti
-         btnPause.disabled = true;
-         btnPlay.onclick = () => startTimer();
-         btnPause.onclick = () => stopTimer();
-         speed.oninput = (e) => {
-             intervalMsLocal = Number(e.target.value);
-             if (isRunning) {
-                 stopTimer(); startTimer();
-             }
-         };
-        // Hover e focus effects per i pulsanti
+        const rowTop = document.createElement('div');
+        Object.assign(rowTop.style, { display: 'flex', gap: '8px', width: '100%', justifyContent: 'space-between' });
+
+        const btnPlay = document.createElement('button'); btnPlay.id = 'randagi-play'; btnPlay.innerHTML = '▶️ <span style="font-weight:600;">Play</span>';
+        const btnPause = document.createElement('button'); btnPause.id = 'randagi-pause'; btnPause.innerHTML = '⏸️ <span style="font-weight:600;">Pausa</span>';
         [btnPlay, btnPause].forEach(b => {
+            b.style.padding = '8px 10px'; b.style.border = 'none'; b.style.background = 'linear-gradient(180deg,#ffffff,#f3f4f6)'; b.style.borderRadius = '8px'; b.style.cursor = 'pointer'; b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)'; b.style.fontSize = '0.95rem';
+        });
+        btnPlay.style.color = '#065f46'; btnPause.style.color = '#7f1d1d';
+        btnPause.disabled = true;
+
+        rowTop.appendChild(btnPlay); rowTop.appendChild(btnPause);
+
+        // slider row
+        const sliderRow = document.createElement('div');
+        Object.assign(sliderRow.style, { display: 'flex', alignItems: 'center', gap: '8px', width: '100%' });
+        const speedLabel = document.createElement('div'); speedLabel.id = 'randagi-speed-label'; speedLabel.style.fontSize = '0.85rem'; speedLabel.style.minWidth = '90px';
+        const speed = document.createElement('input'); speed.type = 'range'; speed.min = '1'; speed.max = '100'; speed.step = '1'; speed.value = String(opts.speedPct || 50);
+        speed.title = 'Velocità (più alto = più veloce)';
+        speed.style.flex = '1';
+        sliderRow.appendChild(speedLabel); sliderRow.appendChild(speed);
+
+        // reset button
+        const resetBtnSmall = document.createElement('button'); resetBtnSmall.textContent = 'Reset';
+        Object.assign(resetBtnSmall.style, { padding: '6px 8px', borderRadius: '8px', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', width: '100%' });
+
+        controlsEl.appendChild(rowTop);
+        controlsEl.appendChild(sliderRow);
+        controlsEl.appendChild(resetBtnSmall);
+
+        mapRandagi.getContainer().appendChild(controlsEl);
+
+        // stato iniziale
+        const minMs = 80; const maxMs = 2400; // più dettaglio
+        function pctToMs(pct) {
+            const clamped = Math.max(0, Math.min(100, Number(pct)));
+            return Math.round(maxMs - (clamped / 100) * (maxMs - minMs));
+        }
+        function updateSpeedLabel() {
+            const pct = Number(speed.value);
+            const ms = pctToMs(pct);
+            speedLabel.textContent = `Velocità: ${pct}%`;
+        }
+        updateSpeedLabel();
+
+        // Closure Variables
+        let idx = 0;
+        let isRunning = false;
+        let intervalMsLocal = pctToMs(Number(speed.value));
+
+        function stepOnce() {
+            if (idx >= months.length) { stopTimer(); labelEl.textContent = 'Fine (Reset per rivedere)'; return; }
+            const monthKey = months[idx++];
+            labelEl.textContent = `Mese: ${formatMonthLabel(monthKey)}`;
+
+            const feats = monthBuckets[monthKey] || [];
+            feats.forEach(f => {
+                try {
+                    const geom = f.geometry;
+                    if (!geom) return;
+                    const latlon = extractCoords(geom);
+                    if (!latlon) return;
+                    const [lat, lon] = latlon;
+                    const info = getAnimalInfo(f.properties || {});
+
+                    const marker = L.circleMarker([lat, lon], {
+                        radius: 8,
+                        fillColor: (info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280',
+                        color: '#222',
+                        weight: 1.25,
+                        opacity: 1,
+                        fillOpacity: 1
+                    });
+                    marker._tipoKey = info && info.key ? info.key : 'other'; // importante per il toggle
+                    const p = f.properties || {};
+                    const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
+                    const nome = (typeof rawName === 'string' && (rawName.toLowerCase() === 'unknown' || rawName.trim() === '')) ? 'Senza nome' : rawName;
+                    let s = (p.sex || p.Sex || p.SESSO || p.gender || p.Gender || '').toString().trim().toLowerCase();
+                    if (!s || s === 'unknown' || s === 'na' || s === 'n/d') s = 'Sconosciuto';
+                    else if (s.startsWith('m')) s = 'Maschio';
+                    else if (s.startsWith('f')) s = 'Femmina';
+                    else s = 'Sconosciuto';
+                    const dateFound = getVal(p, ['Intake Dat','intake_date','intake date','date_found','found_date','Date','datetime','ritrovamento']) || null;
+                    const specieIt = translateSpeciesKeyToItalian(info && info.key ? info.key : 'other');
+                    const popup = `
+                        <div style="font-family:sans-serif; font-size:14px; min-width:180px;">
+                            <div style="background:${(info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280'}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">
+                                ${String(specieIt).toUpperCase()}
+                            </div>
+                            <div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;">
+                                <div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div>
+                                <div style="margin-bottom:6px;"><b>Sesso:</b> ${s}</div>
+                                ${dateFound ? `<div style="margin-bottom:6px;"><b>Intake:</b> ${dateFound}</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                    marker.bindPopup(popup);
+                    marker.addTo(animatedLayerGroup);
+                    try { if (marker.bringToFront) marker.bringToFront(); } catch (e) {}
+                } catch (e) { /* ignore */ }
+            });
+        }
+
+        function startTimer() {
+            if (isRunning) return;
+            isRunning = true;
+            btnPlay.disabled = true; btnPause.disabled = false;
+            // Se eravamo alla fine, ricomincia da capo
+            if (idx >= months.length) {
+                idx = 0;
+                animatedLayerGroup.clearLayers();
+            }
+            // run immediate step
+            stepOnce();
+            // *** FIX: USA VARIABILE GLOBALE ***
+            randagiGlobalTimer = setInterval(() => stepOnce(), intervalMsLocal);
+        }
+
+        function stopTimer() {
+            isRunning = false;
+            // *** FIX: USA VARIABILE GLOBALE ***
+            if (randagiGlobalTimer) { clearInterval(randagiGlobalTimer); randagiGlobalTimer = null; }
+            btnPlay.disabled = false; btnPause.disabled = true;
+        }
+
+        // Timer internal state
+        btnPlay.onclick = () => startTimer();
+        btnPause.onclick = () => stopTimer();
+        speed.oninput = (e) => {
+            updateSpeedLabel();
+            intervalMsLocal = pctToMs(Number(e.target.value));
+            if (isRunning) { stopTimer(); startTimer(); }
+        };
+        resetBtnSmall.onclick = () => { resetRandagiLoading(); };
+
+        [btnPlay, btnPause, resetBtnSmall].forEach(b => {
             b.addEventListener('mouseenter', () => { b.style.transform = 'translateY(-2px) scale(1.02)'; b.style.boxShadow = '0 8px 18px rgba(2,6,23,0.12)'; });
             b.addEventListener('mouseleave', () => { b.style.transform = ''; b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)'; });
             b.addEventListener('focus', () => { b.style.outline = '2px solid rgba(2,132,199,0.16)'; });
             b.addEventListener('blur', () => { b.style.outline = 'none'; });
         });
-     }
+
+        // *** GESTIONE AUTOSTART (per il Reset) ***
+        if (opts.autoStart !== false) {
+            startTimer();
+        } else {
+            labelEl.textContent = 'Pronto - Premi Play';
+        }
+    }
 
     function formatMonthLabel(k) {
         if (k === 'Unknown') return 'Sconosciuto';
         const [y, m] = k.split('-');
         return new Date(Number(y), Number(m) - 1, 1).toLocaleString('it-IT', { month: 'short', year: 'numeric' });
     }
-
-    const allAddedMarkers = [];
-    let idx = 0;
-    let timer = null;
-    let isRunning = false;
-    let intervalMsLocal = opts.intervalMs || 900;
-
-    function stepOnce() {
-        if (idx >= months.length) { stopTimer(); labelEl.textContent = 'Fine'; return; }
-        const monthKey = months[idx++];
-        labelEl.textContent = `Mese: ${formatMonthLabel(monthKey)}`;
-
-        const feats = monthBuckets[monthKey] || [];
-        feats.forEach(f => {
-            try {
-                const geom = f.geometry;
-                if (!geom) return;
-                const latlon = extractCoords(geom);
-                if (!latlon) return;
-                const [lat, lon] = latlon;
-                const info = getAnimalInfo(f.properties || {});
-                // Rendi i puntini più visibili: maggiore raggio, stroke scuro e pieno
-                const marker = L.circleMarker([lat, lon], {
-                    radius: 8,
-                    fillColor: (info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280',
-                    color: '#222',
-                    weight: 1.25,
-                    opacity: 1,
-                    fillOpacity: 1
-                });
-                marker._tipoKey = info && info.key ? info.key : 'other'; // importante per il toggle
-                const p = f.properties || {};
-                const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
-                const nome = (typeof rawName === 'string' && (rawName.toLowerCase() === 'unknown' || rawName.trim() === '')) ? 'Senza nome' : rawName;
-                let s = (p.sex || p.Sex || p.SESSO || p.gender || p.Gender || '').toString().trim().toLowerCase();
-                if (!s || s === 'unknown' || s === 'na' || s === 'n/d') s = 'Sconosciuto';
-                else if (s.startsWith('m')) s = 'Maschio';
-                else if (s.startsWith('f')) s = 'Femmina';
-                else s = 'Sconosciuto';
-                const dateFound = getVal(p, ['Intake Dat','intake_date','intake date','date_found','found_date','Date','datetime','ritrovamento']) || null;
-                const specieIt = translateSpeciesKeyToItalian(info && info.key ? info.key : 'other');
-                const popup = `
-                    <div style="font-family:sans-serif; font-size:14px; min-width:180px;">
-                        <div style="background:${(info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280'}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">
-                            ${String(specieIt).toUpperCase()}
-                        </div>
-                        <div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;">
-                            <div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div>
-                            <div style="margin-bottom:6px;"><b>Sesso:</b> ${s}</div>
-                            ${dateFound ? `<div style="margin-bottom:6px;"><b>Intake:</b> ${dateFound}</div>` : ''}
-                        </div>
-                    </div>
-                `;
-                marker.bindPopup(popup);
-                marker.addTo(animatedLayerGroup);
-                // Assicurati che il marker sia visibile in primo piano
-                try { if (marker.bringToFront) marker.bringToFront(); } catch (e) {}
-                allAddedMarkers.push(marker);
-            } catch (e) { console.error('Errore feature randagi:', e); /* ignore feature errors */ }
-        });
-
-        try {
-            const groupBounds = L.featureGroup(allAddedMarkers).getBounds();
-            if (groupBounds.isValid()) mapRandagi.fitBounds(groupBounds.pad(0.15));
-        } catch (e) {}
-    }
-
-    function startTimer() {
-        if (isRunning) return;
-        isRunning = true;
-        // aggiornamento stato pulsanti
-        try { const bp = document.getElementById('randagi-play'); const bpa = document.getElementById('randagi-pause'); if(bp) bp.disabled = true; if(bpa) bpa.disabled = false; } catch(e){}
-        timer = setInterval(() => stepOnce(), intervalMsLocal);
-        // run immediate step if starting first time
-        if (idx === 0) stepOnce();
-    }
-    function stopTimer() {
-        isRunning = false;
-        if (timer) { clearInterval(timer); timer = null; }
-        // aggiornamento stato pulsanti
-        try { const bp = document.getElementById('randagi-play'); const bpa = document.getElementById('randagi-pause'); if(bp) bp.disabled = false; if(bpa) bpa.disabled = true; } catch(e){}
-    }
-
-    // auto-start
-    startTimer();
 }
 
 // Pulsanti navigazione randagi
 if (btnRandagi) btnRandagi.onclick = () => {
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');
+    // distruggi focolai per evitare sovrapposizioni con la mappa randagi
+    destroyFocolaiMap();
     randagiContainer.classList.remove('hidden');
     // Carica i dati e costruisci i grafici
     loadRandagiData();
@@ -1004,4 +1181,6 @@ if (btnRandagi) btnRandagi.onclick = () => {
 if (btnRandagiBack) btnRandagiBack.onclick = () => {
     randagiContainer.classList.add('hidden');
     homeView.classList.remove('hidden');
+    // distruggi mappa randagi quando torni
+    destroyRandagiMap();
 };

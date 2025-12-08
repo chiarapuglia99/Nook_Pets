@@ -337,6 +337,18 @@ def api_animali_malati():
     return _serve_geojson_safe('animali_malati.geojson')
 
 
+@app.route('/api/geojson/animali_randagi_prova')
+def api_animali_randagi_prova():
+    # Serve il file animali_randagi_prova.geojson se presente nella cartella GEOJSON_DIR
+    return _serve_geojson_safe('animali_randagi_prova.geojson')
+
+
+@app.route('/api/geojson/animali_randagi')
+def api_animali_randagi():
+    # Serve il file animali_randagi.geojson se presente nella cartella GEOJSON_DIR
+    return _serve_geojson_safe('animali_randagi.geojson')
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

@@ -16,6 +16,8 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+  <!-- Chart.js CDN per grafici sezione animali randagi -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <style>
     /* 1. Applica il font rotondo al logo e ai titoli */
@@ -68,6 +70,26 @@
     @media (max-width: 768px) {
       .hero-content h1 { font-size: 2rem; }
     }
+
+    /* Chart wrappers per la sezione randagi: rendono i canvas responsive e leggermente più piccoli */
+    .chart-wrapper {
+      width: 100%;
+      height: 280px; /* leggermente più piccolo */
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fff;
+      padding: 8px;
+      box-shadow: 0 4px 12px rgba(2,6,23,0.04);
+      box-sizing: border-box;
+    }
+    @media (max-width: 900px) {
+      .chart-wrapper { height: 220px; }
+    }
+    @media (max-width: 420px) {
+      .chart-wrapper { height: 180px; }
+    }
+    /* forza il canvas ad adattarsi al contenitore */
+    .chart-wrapper canvas { width: 100% !important; height: 100% !important; display: block; }
   </style>
 </head>
 <body>
@@ -86,6 +108,7 @@
       </div>
       <div class="top-actions">
         <button id="btn-focolai" class="linkish">Visualizza focolai</button>
+        <button id="btn-randagi" class="linkish">Animali randagi</button>
       </div>
     </nav>
 
@@ -133,6 +156,30 @@
 
       <div id="map-focolai" class="map map-focolai" aria-label="Mappa focolai"></div>
       <div id="legend-focolai" class="legend-focolai" aria-hidden="true"></div>
+    </section>
+
+    <!-- Sezione Animali Randagi -->
+    <section id="randagi-container" class="randagi-container hidden">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2>Animali Randagi</h2>
+        <button id="btn-randagi-back" class="linkish" style="font-size:0.9rem;">&larr; Torna</button>
+      </div>
+
+      <p id="randagi-feedback" class="feedback" aria-live="polite"></p>
+
+      <!-- Mappa Randagi -->
+      <div id="map-randagi" class="map" style="height:420px; border-radius:8px; margin-bottom:12px;"></div>
+
+      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+        <div style="flex:1 1 320px;">
+          <h3 style="margin-top:0;">Distribuzione per sesso</h3>
+          <div class="chart-wrapper">
+            <canvas id="randagi-pie"></canvas>
+          </div>
+        </div>
+
+        <!-- Nota: grafici a barre rimossi. L'animazione mese-per-mese apparirà sulla mappa. -->
+      </div>
     </section>
 
     <footer class="footer">

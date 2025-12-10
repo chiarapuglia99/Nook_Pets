@@ -14,10 +14,17 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
   <link rel="stylesheet" href="/css/styles.css">
 
+  <!-- Leaflet Side-by-Side for swipe map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.css" />
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
   <!-- Chart.js CDN per grafici sezione animali randagi -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Side-by-side plugin e heatmap -->
+  <script src="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.min.js"></script>
+  <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 
   <style>
     /* 1. Applica il font rotondo al logo e ai titoli */
@@ -90,6 +97,10 @@
     }
     /* forza il canvas ad adattarsi al contenitore */
     .chart-wrapper canvas { width: 100% !important; height: 100% !important; display: block; }
+
+    /* piccoli aggiustamenti per la mappa focolai in modalità swipe */
+    .map-focolai { height: 520px; border-radius:8px; }
+
   </style>
 </head>
 <body>
@@ -109,6 +120,7 @@
       <div class="top-actions">
         <button id="btn-focolai" class="linkish">Visualizza focolai</button>
         <button id="btn-randagi" class="linkish">Animali randagi</button>
+        <button id="btn-swipe" class="linkish">Swipe Map (Confronto)</button>
       </div>
     </nav>
 
@@ -156,6 +168,17 @@
 
       <div id="map-focolai" class="map map-focolai" aria-label="Mappa focolai"></div>
       <div id="legend-focolai" class="legend-focolai" aria-hidden="true"></div>
+    </section>
+
+    <!-- Sezione separata per la Swipe Map / Confronto -->
+    <section id="map-swipe-container" class="map-swipe-container hidden">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h2>Swipe Map - Confronto</h2>
+        <button id="btn-swipe-back" class="linkish" style="font-size:0.9rem;">&larr; Torna alla ricerca</button>
+      </div>
+
+      <div id="map-swipe" class="map map-swipe" aria-label="Swipe Map" style="height:520px; border-radius:8px;"></div>
+      <div id="legend-swipe" class="legend-focolai" aria-hidden="true" style="margin-top:8px"></div>
     </section>
 
     <!-- Sezione Animali Randagi -->

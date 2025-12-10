@@ -348,6 +348,21 @@ def api_animali_randagi():
     # Serve il file animali_randagi.geojson se presente nella cartella GEOJSON_DIR
     return _serve_geojson_safe('animali_randagi.geojson')
 
+# Nuovi endpoint per i file usati dalla Swipe Map
+@app.route('/api/geojson/Animali Domestici.geojson')
+def api_animali_domestici():
+    return _serve_geojson_safe('Animali Domestici.geojson')
+
+
+@app.route('/api/geojson/Fauna Selvatica.geojson')
+def api_fauna_selvatica():
+    return _serve_geojson_safe('Fauna Selvatica.geojson')
+
+
+@app.route('/api/geojson/Fauna Selvatica -Heatmap.geojson')
+def api_fauna_heatmap():
+    return _serve_geojson_safe('Fauna Selvatica -Heatmap.geojson')
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))

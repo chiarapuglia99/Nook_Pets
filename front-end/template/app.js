@@ -19,23 +19,44 @@ const mapFocolaiContainer = document.getElementById('map-focolai-container');
 const legendFocolaiEl = document.getElementById('legend-focolai');
 const btnBack = document.getElementById('btn-back');
 
+// *** NUOVO: Elementi Vista Swipe Map (Confronto) ***
+const btnSwipe = document.getElementById('btn-swipe');
+const mapSwipeContainer = document.getElementById('map-swipe-container');
+const btnSwipeBack = document.getElementById('btn-swipe-back');
+
+// Elementi Vista Randagi
+const btnRandagi = document.getElementById('btn-randagi');
+const randagiContainer = document.getElementById('randagi-container');
+const btnRandagiBack = document.getElementById('btn-randagi-back');
+const randagiFeedback = document.getElementById('randagi-feedback');
+
 // ==========================================
 // VARIABILI GLOBALI
 // ==========================================
 let map = null;
 let userMarker = null;
 let shelterMarker = null;
+
+// Variabili Focolai
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
 let centriFocolaiLayer = null;
 
+// *** NUOVO: Variabili Swipe Map ***
+let mapSwipe = null;
+let swipeLeftGroup = null;
+let swipeRightGroup = null;
+
+// Variabili Randagi
+let mapRandagi = null;
+let randagiLayer = null;
+let pieChart = null;
+let animatedLayerGroup = null; // layer per l'animazione dei marker
+let randagiGlobalTimer = null; // Timer globale per poterlo fermare
+
 // Variabile per il controllo del percorso (Linea Blu)
 let routingControl = null;
-
-// *** FIX GLOBALE: Timer per l'animazione randagi ***
-// Necessario per poterlo fermare quando si cambia pagina
-let randagiGlobalTimer = null;
 
 // Pool immagini
 const animalMediaPool = [
@@ -69,6 +90,12 @@ function showFeedback(msg, isError = false, withSpinner = false) {
   }
 }
 
+function showRandagiFeedback(msg, isError = false) {
+    if (!randagiFeedback) return;
+    randagiFeedback.textContent = msg;
+    randagiFeedback.style.color = isError ? '#c53030' : '#374151';
+}
+
 function setButtonLoading(loading) {
   btn.disabled = loading;
   if (loading) {
@@ -79,7 +106,7 @@ function setButtonLoading(loading) {
   }
 }
 
-// Funzione globale per copiare le coordinate (chiamata dai popup HTML)
+// Funzione globale per copiare le coordinate
 window.copiaCoordinate = function(lat, lng) {
     navigator.clipboard.writeText(`${lat}, ${lng}`).then(() => {
         alert("Coordinate copiate negli appunti!");
@@ -111,7 +138,7 @@ function resetMap() {
 initMap();
 animalImg.src = pickRandomMedia();
 
-// Handler Form
+// Handler Form Ricerca
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const indirizzo = indirizzoInput.value.trim();
@@ -322,22 +349,21 @@ indirizzoInput.addEventListener('input', debounce(async () => {
   const v = indirizzoInput.value.trim();
   if (!v) { clearAutocomplete(); return; }
   const items = await fetchSuggestions(v);
-  renderAutocomplete(items.slice(0, 10));
+  renderAutocomplete(items.slice(10, 10)); // Fix slice
 }, 250));
 
 window.addEventListener('resize', positionAutocomplete);
 createAutocomplete();
 
 // ==========================================
-// LOGICA FOCOLAI - VERSIONE AVANZATA
+// LOGICA FOCOLAI
 // ==========================================
-
 const TYPE_PALETTE = {
-  'dog': ['#ef4444', '#991b1b'],     // Rosso
-  'cat': ['#3b82f6', '#1e3a8a'],     // Blu
-  'bird': ['#eab308', '#854d0e'],    // Giallo
-  'rabbit': ['#a855f7', '#581c87'],  // Viola
-  'other': ['#6b7280', '#1f2937']    // Grigio
+  'dog': ['#ef4444', '#991b1b'],
+  'cat': ['#3b82f6', '#1e3a8a'],
+  'bird': ['#eab308', '#854d0e'],
+  'rabbit': ['#a855f7', '#581c87'],
+  'other': ['#6b7280', '#1f2937']
 };
 const visibleTypes = {};
 
@@ -363,38 +389,30 @@ function getAnimalInfo(props) {
     return { label: rawType, key: key, palette: TYPE_PALETTE[key] || TYPE_PALETTE['other'] };
 }
 
-// Utility: estrai lat/lon da varie forme di geometry GeoJSON in modo sicuro
 function extractCoords(geom) {
     if (!geom || !geom.coordinates) return null;
     const t = geom.type || 'Point';
     const c = geom.coordinates;
     let coords = null;
     try {
-        if (t === 'Point') {
-            coords = c; // [lon, lat]
-        } else if (t === 'MultiPoint' || t === 'LineString') {
-            coords = Array.isArray(c[0]) ? c[0] : c; // first point
-        } else if (t === 'Polygon') {
-            // polygon -> coordinates[0][0] is first ring first point
-            coords = (Array.isArray(c[0]) && Array.isArray(c[0][0])) ? c[0][0] : null;
-        } else {
-            coords = Array.isArray(c[0]) ? c[0] : null;
-        }
+        if (t === 'Point') coords = c;
+        else if (t === 'MultiPoint' || t === 'LineString') coords = Array.isArray(c[0]) ? c[0] : c;
+        else if (t === 'Polygon') coords = (Array.isArray(c[0]) && Array.isArray(c[0][0])) ? c[0][0] : null;
+        else coords = Array.isArray(c[0]) ? c[0] : null;
     } catch (e) { coords = null; }
     if (!coords || coords.length < 2) return null;
     const lon = Number(coords[0]);
     const lat = Number(coords[1]);
     if (isNaN(lat) || isNaN(lon)) return null;
-    return [lat, lon]; // ritorniamo [lat, lon] comodo per Leaflet
+    return [lat, lon];
 }
 
-// Utility: traduce le chiavi specie interne in etichette italiane
 function translateSpeciesKeyToItalian(key) {
     const m = { 'dog': 'Cane', 'cat': 'Gatto', 'bird': 'Uccello', 'rabbit': 'Coniglio', 'other': 'Altro' };
     return m[key] || (typeof key === 'string' ? (key.charAt(0).toUpperCase() + key.slice(1)) : 'Altro');
 }
 
-// Inizializzazione Layers
+// Inizializzazione Layers Focolai
 zoneLayer = L.geoJSON(null, {
   style: { color: '#dc2626', weight: 5, opacity: 0.7 },
   onEachFeature: (f, l) => l.bindPopup(`<b>ZONA PERICOLOSA:</b><br>${f.properties.name || 'Strada a rischio'}`)
@@ -408,9 +426,19 @@ function initFocolaiMap() {
   zoneLayer.addTo(mapFocolai);
 }
 
-// =======================================================
-// CARICAMENTO FOCOLAI (Zone, Animali, e Centri Zone Rosse)
-// =======================================================
+// Distrugge mappa focolai
+function destroyFocolaiMap() {
+    try {
+        if (mapFocolai) {
+            if (zoneLayer) try { zoneLayer.clearLayers(); } catch (e) {}
+            if (animaliLayer) try { animaliLayer.clearLayers(); } catch (e) {}
+            if (centriFocolaiLayer) try { centriFocolaiLayer.clearLayers(); } catch (e) {}
+            mapFocolai.remove();
+            mapFocolai = null;
+        }
+    } catch (e) { console.warn('destroyFocolaiMap error', e); }
+}
+
 async function loadFocolai() {
   if (!mapFocolai) return;
   showFeedback('Carico analisi focolai...', false, true);
@@ -467,7 +495,6 @@ async function loadFocolai() {
 
         animaliLayer.addTo(mapFocolai);
 
-        // Auto-Zoom
         const bounds = zoneLayer.getBounds();
         if(animaliLayer.getLayers().length > 0) bounds.extend(animaliLayer.getBounds());
         if (bounds.isValid()) mapFocolai.fitBounds(bounds.pad(0.1));
@@ -475,56 +502,33 @@ async function loadFocolai() {
         buildLegend();
     }
 
-    // 3. --- CARICAMENTO CENTRI FOCOLAI (GESTIONE NULL) ---
+    // 3. Centri Focolai
     const resCentri = await fetch('/api/geojson/zone_rosse');
     if (resCentri.ok) {
         const dataCentri = await resCentri.json();
-
-        // Rimuovi layer precedente
         if (centriFocolaiLayer) mapFocolai.removeLayer(centriFocolaiLayer);
-
-        // Inizializza un contatore per i focolai senza ID
         let unknownCounter = 1;
 
         centriFocolaiLayer = L.geoJSON(dataCentri, {
             pointToLayer: (feature, latlng) => {
                 return L.circleMarker(latlng, {
-                    radius: 15,
-                    fillColor: '#ff0000',
-                    color: '#000',
-                    weight: 2,
-                    opacity: 1,
-                    fillOpacity: 0.5
+                    radius: 15, fillColor: '#ff0000', color: '#000',
+                    weight: 2, opacity: 1, fillOpacity: 0.5
                 });
             },
             onEachFeature: (feature, layer) => {
                 const props = feature.properties;
-                // Coordinate per visualizzazione e copia
                 const lat = feature.geometry.coordinates[1].toFixed(5);
                 const lng = feature.geometry.coordinates[0].toFixed(5);
-
-                // --- LOGICA GESTIONE ID NULL ---
-                // Cerca l'ID tra le possibili chiavi
                 const rawId = getVal(props, ['CLUSTER_ID', 'cluster_id', 'id', 'ID']);
-
-                let displayTitle;
-
-                if (rawId !== null && rawId !== undefined && rawId !== "") {
-                    // Se l'ID esiste, usalo
-                    displayTitle = `⚠️ FOCOLAIO ${rawId}`;
-                } else {
-                    // Se è null, usa un numero progressivo generato da noi
-                    displayTitle = `ZONA ROSSA #${unknownCounter++}`;
-                }
-                // -------------------------------
+                let displayTitle = (rawId !== null && rawId !== undefined && rawId !== "") ? `⚠️ FOCOLAIO ${rawId}` : `ZONA ROSSA #${unknownCounter++}`;
 
                 const popupContent = `
                     <div style="text-align:center; min-width:150px;">
                         <h3 style="margin:0; color:#dc2626; font-family:'Fredoka', sans-serif;">${displayTitle}</h3>
                         <p style="font-size:0.9rem; margin:5px 0;">Alta concentrazione rilevata.</p>
                         <div style="background:#f3f4f6; padding:5px; border-radius:4px; font-family:monospace; font-weight:bold;">
-                            LAT: ${lat}<br>
-                            LON: ${lng}
+                            LAT: ${lat}<br>LON: ${lng}
                         </div>
                         <button onclick="copiaCoordinate(${lat}, ${lng})" style="margin-top:5px; font-size:0.8rem; cursor:pointer;">
                             Copia Coordinate
@@ -534,7 +538,6 @@ async function loadFocolai() {
                 layer.bindPopup(popupContent);
             }
         });
-
         centriFocolaiLayer.addTo(mapFocolai);
         centriFocolaiLayer.bringToFront();
     }
@@ -564,7 +567,6 @@ function updateVisibility() {
 
 function toggleType(key) {
     visibleTypes[key] = !visibleTypes[key];
-    // Aggiorna layer statici (animaliLayer)
     if (animaliLayer) {
         animaliLayer.eachLayer(layer => {
             try {
@@ -576,8 +578,7 @@ function toggleType(key) {
             } catch (e) {}
         });
     }
-
-    // Aggiorna markers animati
+    // Toggle anche per i randagi
     if (animatedLayerGroup) {
         animatedLayerGroup.eachLayer(layer => {
             try {
@@ -600,29 +601,21 @@ function toggleType(key) {
 function buildLegend() {
     if (!legendFocolaiEl || !animaliLayer) return;
     legendFocolaiEl.innerHTML = '<h5 style="margin:0 0 8px 0; font-size:0.9rem; font-weight:bold;">Legenda Specie</h5>';
-
     const keysFound = new Set();
     animaliLayer.eachLayer(l => keysFound.add(l._tipoKey));
     keysFound.forEach(key => {
         if(visibleTypes[key] === undefined) visibleTypes[key] = true;
-
         const pal = TYPE_PALETTE[key] || TYPE_PALETTE['other'];
         const row = document.createElement('div');
         row.id = `leg-row-${key}`;
         Object.assign(row.style, { display: 'flex', alignItems: 'center', cursor: 'pointer', marginBottom: '6px' });
-
         const dot = document.createElement('span');
         Object.assign(dot.style, {
             width: '18px', height: '18px',
             background: `linear-gradient(135deg, ${pal[0]} 50%, ${pal[1]} 50%)`,
             border: '1px solid #9ca3af', borderRadius: '50%', marginRight: '8px'
         });
-
-        let labelTxt = key.charAt(0).toUpperCase() + key.slice(1);
-        if(key === 'dog') labelTxt = 'Cane';
-        if(key === 'cat') labelTxt = 'Gatto';
-        if(key === 'bird') labelTxt = 'Uccello';
-
+        let labelTxt = translateSpeciesKeyToItalian(key);
         const txt = document.createElement('span');
         txt.textContent = labelTxt;
         txt.style.fontSize = '0.9rem';
@@ -634,123 +627,124 @@ function buildLegend() {
     legendFocolaiEl.classList.remove('hidden');
 }
 
-// Gestione Navigazione: Tasto per andare alla vista Focolai
-if (btnFocolai) btnFocolai.onclick = () => {
-    homeView.classList.add('hidden');
+// ==========================================
+// SWIPE MAP (nuova sezione separata)
+// ==========================================
+function initSwipeMap() {
+  if (mapSwipe) { setTimeout(() => mapSwipe.invalidateSize(), 100); return; }
+  const urban = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 });
+  const wild = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', { maxZoom: 19 });
 
-    // *** FIX: Nascondi esplicitamente la vista Randagi ***
-    if (randagiContainer) randagiContainer.classList.add('hidden');
+  mapSwipe = L.map('map-swipe', { center: [34.0219, -118.4814], zoom: 11, layers: [urban] });
+  // gruppi per vettori
+  swipeLeftGroup = L.layerGroup().addTo(mapSwipe);
+  swipeRightGroup = L.layerGroup().addTo(mapSwipe);
 
-    mapFocolaiContainer.classList.remove('hidden');
-
-    // *** FIX: Distruggi completamente l'ambiente randagi (ferma timer) ***
-    destroyRandagiMap();
-
-    initFocolaiMap();
-    loadFocolai();
-};
-
-if (btnBack) btnBack.onclick = () => {
-    mapFocolaiContainer.classList.add('hidden');
-    homeView.classList.remove('hidden');
-    // distruggi focolai quando torni
-    destroyFocolaiMap();
-};
-
-// =========================
-// SEZIONE ANIMALI RANDAGI
-// =========================
-const btnRandagi = document.getElementById('btn-randagi');
-const randagiContainer = document.getElementById('randagi-container');
-const btnRandagiBack = document.getElementById('btn-randagi-back');
-const randagiFeedback = document.getElementById('randagi-feedback');
-
-let pieChart = null;
-// layer per l'animazione dei marker (cumulativo)
-let animatedLayerGroup = null;
-
-// Funzione per mostrare feedback nella sezione Randagi
-function showRandagiFeedback(msg, isError = false) {
-    if (!randagiFeedback) return;
-    randagiFeedback.textContent = msg;
-    randagiFeedback.style.color = isError ? '#c53030' : '#374151';
+  L.control.layers({ 'Urban': urban, 'Wild': wild }, {}).addTo(mapSwipe);
+  wild.addTo(mapSwipe);
+  setTimeout(() => {
+    try { if (typeof L.control.sideBySide === 'function') L.control.sideBySide(urban, wild).addTo(mapSwipe); } catch(e){}
+  }, 200);
 }
 
-let mapRandagi = null;
-let randagiLayer = null;
+async function loadSwipeMap() {
+  if (!mapSwipe) return;
+  showFeedback('Carico Swipe Map...', false, true);
+  try {
+    // carica Animali Domestici a sinistra
+    const resLeft = await fetch('/api/geojson/Animali Domestici.geojson');
+    if (resLeft.ok) {
+      const data = await resLeft.json();
+      swipeLeftGroup.clearLayers();
+      L.geoJSON(data, {
+        pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#ff7b7b', color:'#fff', weight:1, fillOpacity:0.9 }),
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties || {};
+          const content = `<div style="font-family:sans-serif; font-size:13px;"><div><b>Nome:</b> ${getVal(p,['Animal Name','name'])||'Senza nome'}</div><div><b>Tipo:</b> ${getVal(p,['Animal Type','animal_type'])||'N/A'}</div></div>`;
+          layer.bindPopup(content);
+          layer.on('click', () => layer.openPopup());
+        }
+      }).addTo(swipeLeftGroup);
+    }
+
+    // carica Fauna Selvatica a destra + heatmap
+    const resRight = await fetch('/api/geojson/Fauna Selvatica.geojson');
+    const resHeat = await fetch('/api/geojson/Fauna Selvatica -Heatmap.geojson');
+    swipeRightGroup.clearLayers();
+    if (resRight.ok) {
+      const data = await resRight.json();
+      L.geoJSON(data, {
+        pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#7bdcff', color:'#fff', weight:1, fillOpacity:0.9 }),
+        onEachFeature: (feature, layer) => {
+          const p = feature.properties || {};
+          const content = `<div style="font-family:sans-serif; font-size:13px;"><div><b>Nome:</b> ${getVal(p,['Animal Name','name'])||'Senza nome'}</div><div><b>Tipo:</b> ${getVal(p,['Animal Type','animal_type'])||'N/A'}</div></div>`;
+          layer.bindPopup(content);
+          layer.on('click', () => layer.openPopup());
+        }
+      }).addTo(swipeRightGroup);
+    }
+    if (resHeat.ok) {
+      const heatData = await resHeat.json();
+      const heatPoints = [];
+      for (const f of heatData.features) {
+        const c = extractCoords(f.geometry);
+        if (c) heatPoints.push([c[0], c[1], 0.6]);
+      }
+      if (heatPoints.length) L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 17 }).addTo(swipeRightGroup);
+    }
+
+    showFeedback('Swipe Map caricata.');
+  } catch (e) {
+    console.error(e);
+    showFeedback('Errore caricamento Swipe Map.', true);
+  }
+}
+
+function destroySwipeMap() {
+  try {
+    if (mapSwipe) {
+      if (swipeLeftGroup) try { swipeLeftGroup.clearLayers(); } catch(e){}
+      if (swipeRightGroup) try { swipeRightGroup.clearLayers(); } catch(e){}
+      mapSwipe.remove(); mapSwipe = null; swipeLeftGroup = null; swipeRightGroup = null;
+    }
+  } catch (e) { console.warn('destroySwipeMap error', e); }
+}
+
+// ==========================================
+// SEZIONE ANIMALI RANDAGI
+// ==========================================
 
 function initRandagiMap(lat = 34.0219, lng = -118.4814, zoom = 11) {
-    // Se la mappa è già inizializzata, forza l'invalidateSize per correggere rendering
     if (!document.getElementById('map-randagi')) return;
     if (mapRandagi) { setTimeout(() => mapRandagi.invalidateSize(), 200); return; }
-
     mapRandagi = L.map('map-randagi', { preferCanvas: true }).setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapRandagi);
 }
 
-// *** FIX: Funzione per distruggere mappa randagi e PULIRE TUTTO ***
 function destroyRandagiMap() {
     try {
-        // 1. FERMA IL TIMER GLOBALE (Fix fondamentale)
-        if (randagiGlobalTimer) {
-            clearInterval(randagiGlobalTimer);
-            randagiGlobalTimer = null;
-        }
-
-        // 2. RIMUOVI ELEMENTI UI
+        if (randagiGlobalTimer) { clearInterval(randagiGlobalTimer); randagiGlobalTimer = null; }
         const controls = document.getElementById('randagi-anim-controls');
         if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
         const label = document.getElementById('randagi-anim-label');
         if (label && label.parentNode) label.parentNode.removeChild(label);
         const table = document.getElementById('randagi-table-container');
         if (table && table.parentNode) table.parentNode.removeChild(table);
-
-        // Pulizia legenda specifica
         const leg = document.getElementById('randagi-legend');
         if (leg) leg.remove();
 
-        // 3. PULIZIA LAYER E MAPPA
-        if (animatedLayerGroup) {
-            try { animatedLayerGroup.clearLayers(); } catch (e) {}
-            animatedLayerGroup = null;
-        }
-        if (mapRandagi) {
-            mapRandagi.remove();
-            mapRandagi = null;
-        }
-
-        // 4. NASCONDI IL CONTENITORE HTML (Fix visuale)
-        if (randagiContainer) {
-            randagiContainer.classList.add('hidden');
-        }
-
+        if (animatedLayerGroup) { try { animatedLayerGroup.clearLayers(); } catch (e) {} animatedLayerGroup = null; }
+        if (mapRandagi) { mapRandagi.remove(); mapRandagi = null; }
+        if (randagiContainer) { randagiContainer.classList.add('hidden'); }
     } catch (e) { console.warn('destroyRandagiMap error', e); }
 }
 
-// Funzione per distruggere la mappa focolai
-function destroyFocolaiMap() {
-    try {
-        if (mapFocolai) {
-            // rimuovi layers e mappa
-            if (zoneLayer) try { zoneLayer.clearLayers(); } catch (e) {}
-            if (animaliLayer) try { animaliLayer.clearLayers(); } catch (e) {}
-            if (centriFocolaiLayer) try { centriFocolaiLayer.clearLayers(); } catch (e) {}
-            mapFocolai.remove();
-            mapFocolai = null;
-        }
-    } catch (e) { console.warn('destroyFocolaiMap error', e); }
-}
-
-// Modifica loadRandagiData: salva i dati in window.randagiBuckets per il reset
 async function loadRandagiData() {
     showRandagiFeedback('Caricamento dati randagi...', false);
     try {
-        // Richiesta con cache-buster
         const res = await fetch(`/api/geojson/animali_randagi?_=${Date.now()}`);
         if (!res.ok) { throw new Error('Impossibile caricare animali randagi'); }
         const data = await res.json();
-
-        // Se vuoto
         if (data && data.type === 'FeatureCollection' && Array.isArray(data.features) && data.features.length === 0) {
             showRandagiFeedback('Nessun dato per animali randagi trovato (file mancante o vuoto).', true);
             return;
@@ -758,25 +752,21 @@ async function loadRandagiData() {
 
         buildRandagiTable(data.features || []);
 
-        // Conteggi
         const countsSesso = { 'Male': 0, 'Female': 0, 'Unknown': 0 };
         const countsTipo = {};
         const monthBuckets = {};
 
         (data.features || []).forEach(f => {
             const p = f.properties || {};
-            // Estrai sesso
             let s = (p.sex || p.Sex || p.SESSO || p.gender || p.Gender || '').toString().trim().toLowerCase();
-            if (!s || s === 'unknown' || s === 'na' || s === 'n/d') s = 'Unknown';
+            if (!s || s === 'unknown' || s === 'na') s = 'Unknown';
             else if (s.startsWith('m')) s = 'Male';
             else if (s.startsWith('f')) s = 'Female';
             else s = 'Unknown';
-
             countsSesso[s] = (countsSesso[s] || 0) + 1;
 
-            // Estrai tipo
-            let t = (p.species || p.type || p.animal_type || p['Animal Type'] || p['Animal Typ'] || '').toString().trim().toLowerCase();
-            if (!t) t = (p['Animal Typ'] || p['Animal T_3'] || '').toString().trim().toLowerCase();
+            let t = (p.species || p.type || p.animal_type || '').toString().trim().toLowerCase();
+            if (!t) t = (p['Animal Typ'] || '').toString().trim().toLowerCase();
             if (!t) t = 'other';
             if (t.includes('dog') || t.includes('cane')) t = 'dog';
             else if (t.includes('cat') || t.includes('gatto')) t = 'cat';
@@ -785,8 +775,7 @@ async function loadRandagiData() {
             else t = 'other';
             countsTipo[t] = (countsTipo[t] || 0) + 1;
 
-            // Estrai la data
-            let rawDate = getVal(p, ['Intake Dat', 'intake_date', 'intake date', 'intake_datetime', 'intake_time', 'intake', 'found_date', 'date_found', 'Date', 'datetime', 'ritrovamento']) || '';
+            let rawDate = getVal(p, ['Intake Dat', 'intake_date', 'date_found', 'found_date', 'Date', 'datetime']) || '';
             let monthKey = 'Unknown';
             if (rawDate) {
                 try {
@@ -807,23 +796,16 @@ async function loadRandagiData() {
 
         buildRandagiCharts(countsSesso);
         initRandagiMap();
-
         if (randagiLayer && mapRandagi) { mapRandagi.removeLayer(randagiLayer); randagiLayer = null; }
-
         buildRandagiLegend(countsTipo);
-
-        // *** FIX: SALVATAGGIO GLOBALE PER RESET ***
         window.randagiBuckets = monthBuckets;
-
         animateRandagiByMonth(monthBuckets);
-
         showRandagiFeedback('');
     } catch (e) {
         console.error(e);
         showRandagiFeedback('Errore nel caricamento dei dati randagi.', true);
     }
 }
-
 
 function buildRandagiCharts(countsSesso) {
      const pieCtx = document.getElementById('randagi-pie').getContext('2d');
@@ -838,23 +820,8 @@ function buildRandagiCharts(countsSesso) {
          type: 'pie',
          data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors }] },
          options: {
-             plugins: {
-                 legend: { position: 'bottom' },
-                 tooltip: {
-                     callbacks: {
-                         label: function(context) {
-                             const idx = context.dataIndex;
-                             const label = context.label || '';
-                             const value = context.dataset.data[idx] || 0;
-                             const total = context.dataset.data.reduce((s, v) => s + v, 0) || 1;
-                             const perc = ((value / total) * 100).toFixed(1);
-                             return `${label}: ${value} (${perc}%)`;
-                         }
-                     }
-                 }
-             },
-             responsive: true,
-             maintainAspectRatio: false
+             plugins: { legend: { position: 'bottom' } },
+             responsive: true, maintainAspectRatio: false
          }
      });
  }
@@ -869,7 +836,6 @@ function buildRandagiCharts(countsSesso) {
         randagiContainer.appendChild(legend);
     }
     legend.innerHTML = '<strong>Legenda specie</strong>';
-
     const pal = { 'dog': '#ef4444', 'cat': '#3b82f6', 'bird': '#eab308', 'rabbit': '#a855f7', 'other': '#6b7280' };
     const nameMap = { 'dog': 'Cane', 'cat': 'Gatto', 'bird': 'Uccello', 'rabbit': 'Coniglio', 'other': 'Altro' };
 
@@ -899,8 +865,7 @@ function buildRandagiTable(features) {
     Object.assign(container.style, { marginTop: '12px', background: '#fff', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' });
 
     const table = document.createElement('table');
-    table.style.width = '100%';
-    table.style.borderCollapse = 'collapse';
+    table.style.width = '100%'; table.style.borderCollapse = 'collapse';
     table.innerHTML = `<thead><tr><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Specie</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Data</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Coordinate</th></tr></thead>`;
 
     const tbody = document.createElement('tbody');
@@ -909,46 +874,33 @@ function buildRandagiTable(features) {
         try {
             const p = f.properties || {};
             const geom = f.geometry || {};
-            let id = getVal(p, ['id','ID','Id','objectid','OBJECTID']);
-            let name = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || '';
-            let date = getVal(p, ['Intake Dat','intake_date','date_found','found_date','Date','datetime','ritrovamento']) || '';
+            let id = getVal(p, ['id','ID','Id','objectid']);
+            let name = getVal(p, ['Animal Nam', 'Animal Name', 'name']) || '';
+            let date = getVal(p, ['Intake Dat','intake_date','date_found']) || '';
             const coords = extractCoords(geom) || [];
             const coordStr = coords.length >= 2 ? `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}` : '';
             const key = id ? String(id) : `${String(name).trim().toLowerCase()}|${String(date).trim()}|${coordStr}`;
             if (seen.has(key)) return; seen.add(key);
-
-            const specieRaw = getVal(p, ['species','type','animal_type','Animal Type','Animal Typ']) || '';
-            let specie = (specieRaw || '').toString().toLowerCase();
-            if (specie.includes('dog') || specie.includes('cane')) specie = 'Cane';
-            else if (specie.includes('cat') || specie.includes('gatto')) specie = 'Gatto';
-            else if (specie.includes('bird') || specie.includes('uccello')) specie = 'Uccello';
-            else if (specie.includes('rabbit') || specie.includes('coniglio')) specie = 'Coniglio';
-            else specie = 'Altro';
-
+            let specie = getVal(p, ['species','type','animal_type','Animal Type']) || '';
+            specie = translateSpeciesKeyToItalian(specie.toLowerCase());
             const tr = document.createElement('tr');
             tr.innerHTML = `<td style="padding:6px; border-bottom:1px solid #f3f3f3">${name || 'Senza nome'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${specie}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${date || '-'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${coordStr || '-'}</td>`;
             tbody.appendChild(tr);
-        } catch (e) { /* ignore row errors */ }
+        } catch (e) { }
     });
-
     table.appendChild(tbody);
     container.appendChild(table);
 
     const resetBtn = document.createElement('button');
     resetBtn.textContent = 'Reset caricamento';
     Object.assign(resetBtn.style, { marginTop: '8px', padding: '8px 10px', borderRadius: '8px', cursor: 'pointer', border: 'none', background: '#ef4444', color: '#fff' });
-    resetBtn.onclick = () => {
-        resetRandagiLoading();
-    };
+    resetBtn.onclick = () => { resetRandagiLoading(); };
     container.appendChild(resetBtn);
-
     randagiContainer.appendChild(container);
 }
 
-// Reset dell'animazione
 function resetRandagiLoading() {
     try {
-        // 1. Ferma tutto e pulisci
         const play = document.getElementById('randagi-play');
         const pause = document.getElementById('randagi-pause');
         if (play) play.disabled = false;
@@ -965,36 +917,29 @@ function resetRandagiLoading() {
         const label = document.getElementById('randagi-anim-label');
         if (label && label.parentNode) label.parentNode.removeChild(label);
 
-        // 2. --- FIX: Se abbiamo i dati, ricostruiamo l'interfaccia in pausa ---
         if (window.randagiBuckets) {
             showRandagiFeedback('Animazione resettata. Premi Play per iniziare.');
-            // Rilanciamo la funzione passando "autoStart: false"
             animateRandagiByMonth(window.randagiBuckets, { speedPct: 50, autoStart: false });
         } else {
             showRandagiFeedback('Caricamento resettato.');
         }
-
     } catch (e) { console.warn('resetRandagiLoading error', e); }
 }
 
-// Funzione che anima l'apparizione dei randagi
 function animateRandagiByMonth(monthBuckets, opts = {}) {
     if (!mapRandagi) return;
-    // pulisci layer precedente
     if (animatedLayerGroup) {
         try { animatedLayerGroup.eachLayer(l => { if (l.remove) l.remove(); }); } catch(e){}
         if (mapRandagi.hasLayer(animatedLayerGroup)) mapRandagi.removeLayer(animatedLayerGroup);
     }
     animatedLayerGroup = L.layerGroup().addTo(mapRandagi);
 
-    // prepara months ordinati (YYYY-MM), Unknown in fondo
     const rawKeys = Object.keys(monthBuckets || {});
     const knownKeys = rawKeys.filter(k => k !== 'Unknown' && /^\d{4}-\d{2}$/.test(k)).sort();
     const otherKeys = rawKeys.filter(k => !/^\d{4}-\d{2}$/.test(k) && k !== 'Unknown');
     const months = knownKeys.concat(otherKeys);
     if (rawKeys.includes('Unknown')) months.push('Unknown');
 
-    // overlay mese corrente + controlli
     let labelEl = document.getElementById('randagi-anim-label');
     if (!labelEl) {
         labelEl = document.createElement('div');
@@ -1003,163 +948,78 @@ function animateRandagiByMonth(monthBuckets, opts = {}) {
         mapRandagi.getContainer().appendChild(labelEl);
     }
 
-    // controlli play/pause e slider velocità
     let controlsEl = document.getElementById('randagi-anim-controls');
     if (!controlsEl) {
         controlsEl = document.createElement('div');
         controlsEl.id = 'randagi-anim-controls';
         Object.assign(controlsEl.style, { position: 'absolute', top: '50px', right: '10px', padding: '8px', background: 'rgba(255,255,255,0.95)', borderRadius: '10px', zIndex: 1000, display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 6px 20px rgba(15,23,42,0.12)', flexDirection: 'column', minWidth: '180px' });
-
         const rowTop = document.createElement('div');
         Object.assign(rowTop.style, { display: 'flex', gap: '8px', width: '100%', justifyContent: 'space-between' });
-
         const btnPlay = document.createElement('button'); btnPlay.id = 'randagi-play'; btnPlay.innerHTML = '▶️ <span style="font-weight:600;">Play</span>';
         const btnPause = document.createElement('button'); btnPause.id = 'randagi-pause'; btnPause.innerHTML = '⏸️ <span style="font-weight:600;">Pausa</span>';
         [btnPlay, btnPause].forEach(b => {
             b.style.padding = '8px 10px'; b.style.border = 'none'; b.style.background = 'linear-gradient(180deg,#ffffff,#f3f4f6)'; b.style.borderRadius = '8px'; b.style.cursor = 'pointer'; b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)'; b.style.fontSize = '0.95rem';
         });
-        btnPlay.style.color = '#065f46'; btnPause.style.color = '#7f1d1d';
-        btnPause.disabled = true;
-
+        btnPlay.style.color = '#065f46'; btnPause.style.color = '#7f1d1d'; btnPause.disabled = true;
         rowTop.appendChild(btnPlay); rowTop.appendChild(btnPause);
 
-        // slider row
         const sliderRow = document.createElement('div');
         Object.assign(sliderRow.style, { display: 'flex', alignItems: 'center', gap: '8px', width: '100%' });
         const speedLabel = document.createElement('div'); speedLabel.id = 'randagi-speed-label'; speedLabel.style.fontSize = '0.85rem'; speedLabel.style.minWidth = '90px';
         const speed = document.createElement('input'); speed.type = 'range'; speed.min = '1'; speed.max = '100'; speed.step = '1'; speed.value = String(opts.speedPct || 50);
-        speed.title = 'Velocità (più alto = più veloce)';
         speed.style.flex = '1';
         sliderRow.appendChild(speedLabel); sliderRow.appendChild(speed);
-
-        // reset button
         const resetBtnSmall = document.createElement('button'); resetBtnSmall.textContent = 'Reset';
         Object.assign(resetBtnSmall.style, { padding: '6px 8px', borderRadius: '8px', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', width: '100%' });
-
-        controlsEl.appendChild(rowTop);
-        controlsEl.appendChild(sliderRow);
-        controlsEl.appendChild(resetBtnSmall);
-
+        controlsEl.appendChild(rowTop); controlsEl.appendChild(sliderRow); controlsEl.appendChild(resetBtnSmall);
         mapRandagi.getContainer().appendChild(controlsEl);
 
-        // stato iniziale
-        const minMs = 80; const maxMs = 2400; // più dettaglio
-        function pctToMs(pct) {
-            const clamped = Math.max(0, Math.min(100, Number(pct)));
-            return Math.round(maxMs - (clamped / 100) * (maxMs - minMs));
-        }
-        function updateSpeedLabel() {
-            const pct = Number(speed.value);
-            const ms = pctToMs(pct);
-            speedLabel.textContent = `Velocità: ${pct}%`;
-        }
+        const minMs = 80; const maxMs = 2400;
+        function pctToMs(pct) { return Math.round(maxMs - (Math.max(0, Math.min(100, Number(pct))) / 100) * (maxMs - minMs)); }
+        function updateSpeedLabel() { speedLabel.textContent = `Velocità: ${speed.value}%`; }
         updateSpeedLabel();
 
-        // Closure Variables
-        let idx = 0;
-        let isRunning = false;
-        let intervalMsLocal = pctToMs(Number(speed.value));
+        let idx = 0; let isRunning = false; let intervalMsLocal = pctToMs(Number(speed.value));
 
         function stepOnce() {
             if (idx >= months.length) { stopTimer(); labelEl.textContent = 'Fine (Reset per rivedere)'; return; }
             const monthKey = months[idx++];
             labelEl.textContent = `Mese: ${formatMonthLabel(monthKey)}`;
-
             const feats = monthBuckets[monthKey] || [];
             feats.forEach(f => {
                 try {
-                    const geom = f.geometry;
-                    if (!geom) return;
-                    const latlon = extractCoords(geom);
-                    if (!latlon) return;
-                    const [lat, lon] = latlon;
+                    const geom = f.geometry; if (!geom) return;
+                    const latlon = extractCoords(geom); if (!latlon) return;
                     const info = getAnimalInfo(f.properties || {});
-
-                    const marker = L.circleMarker([lat, lon], {
-                        radius: 8,
-                        fillColor: (info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280',
-                        color: '#222',
-                        weight: 1.25,
-                        opacity: 1,
-                        fillOpacity: 1
+                    const marker = L.circleMarker(latlon, {
+                        radius: 8, fillColor: (info.palette ? info.palette[0] : '#6b7280'),
+                        color: '#222', weight: 1.25, opacity: 1, fillOpacity: 1
                     });
-                    marker._tipoKey = info && info.key ? info.key : 'other'; // importante per il toggle
+                    marker._tipoKey = info.key || 'other';
                     const p = f.properties || {};
-                    const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
-                    const nome = (typeof rawName === 'string' && (rawName.toLowerCase() === 'unknown' || rawName.trim() === '')) ? 'Senza nome' : rawName;
-                    let s = (p.sex || p.Sex || p.SESSO || p.gender || p.Gender || '').toString().trim().toLowerCase();
-                    if (!s || s === 'unknown' || s === 'na' || s === 'n/d') s = 'Sconosciuto';
-                    else if (s.startsWith('m')) s = 'Maschio';
-                    else if (s.startsWith('f')) s = 'Femmina';
-                    else s = 'Sconosciuto';
-                    const dateFound = getVal(p, ['Intake Dat','intake_date','intake date','date_found','found_date','Date','datetime','ritrovamento']) || null;
-                    const specieIt = translateSpeciesKeyToItalian(info && info.key ? info.key : 'other');
-                    const popup = `
-                        <div style="font-family:sans-serif; font-size:14px; min-width:180px;">
-                            <div style="background:${(info && info.palette && info.palette[0]) ? info.palette[0] : '#6b7280'}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">
-                                ${String(specieIt).toUpperCase()}
-                            </div>
-                            <div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;">
-                                <div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div>
-                                <div style="margin-bottom:6px;"><b>Sesso:</b> ${s}</div>
-                                ${dateFound ? `<div style="margin-bottom:6px;"><b>Intake:</b> ${dateFound}</div>` : ''}
-                            </div>
-                        </div>
-                    `;
-                    marker.bindPopup(popup);
+                    const nome = getVal(p, ['Animal Nam', 'name']) || 'Senza nome';
+                    marker.bindPopup(`<b>${translateSpeciesKeyToItalian(info.key)}</b><br>Nome: ${nome}`);
                     marker.addTo(animatedLayerGroup);
-                    try { if (marker.bringToFront) marker.bringToFront(); } catch (e) {}
-                } catch (e) { /* ignore */ }
+                } catch (e) { }
             });
         }
-
         function startTimer() {
-            if (isRunning) return;
-            isRunning = true;
+            if (isRunning) return; isRunning = true;
             btnPlay.disabled = true; btnPause.disabled = false;
-            // Se eravamo alla fine, ricomincia da capo
-            if (idx >= months.length) {
-                idx = 0;
-                animatedLayerGroup.clearLayers();
-            }
-            // run immediate step
-            stepOnce();
-            // *** FIX: USA VARIABILE GLOBALE ***
-            randagiGlobalTimer = setInterval(() => stepOnce(), intervalMsLocal);
+            if (idx >= months.length) { idx = 0; animatedLayerGroup.clearLayers(); }
+            stepOnce(); randagiGlobalTimer = setInterval(() => stepOnce(), intervalMsLocal);
         }
-
         function stopTimer() {
             isRunning = false;
-            // *** FIX: USA VARIABILE GLOBALE ***
             if (randagiGlobalTimer) { clearInterval(randagiGlobalTimer); randagiGlobalTimer = null; }
             btnPlay.disabled = false; btnPause.disabled = true;
         }
-
-        // Timer internal state
         btnPlay.onclick = () => startTimer();
         btnPause.onclick = () => stopTimer();
-        speed.oninput = (e) => {
-            updateSpeedLabel();
-            intervalMsLocal = pctToMs(Number(e.target.value));
-            if (isRunning) { stopTimer(); startTimer(); }
-        };
+        speed.oninput = (e) => { updateSpeedLabel(); intervalMsLocal = pctToMs(Number(e.target.value)); if (isRunning) { stopTimer(); startTimer(); } };
         resetBtnSmall.onclick = () => { resetRandagiLoading(); };
-
-        [btnPlay, btnPause, resetBtnSmall].forEach(b => {
-            b.addEventListener('mouseenter', () => { b.style.transform = 'translateY(-2px) scale(1.02)'; b.style.boxShadow = '0 8px 18px rgba(2,6,23,0.12)'; });
-            b.addEventListener('mouseleave', () => { b.style.transform = ''; b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)'; });
-            b.addEventListener('focus', () => { b.style.outline = '2px solid rgba(2,132,199,0.16)'; });
-            b.addEventListener('blur', () => { b.style.outline = 'none'; });
-        });
-
-        // *** GESTIONE AUTOSTART (per il Reset) ***
-        if (opts.autoStart !== false) {
-            startTimer();
-        } else {
-            labelEl.textContent = 'Pronto - Premi Play';
-        }
+        if (opts.autoStart !== false) startTimer(); else labelEl.textContent = 'Pronto - Premi Play';
     }
-
     function formatMonthLabel(k) {
         if (k === 'Unknown') return 'Sconosciuto';
         const [y, m] = k.split('-');
@@ -1167,20 +1027,80 @@ function animateRandagiByMonth(monthBuckets, opts = {}) {
     }
 }
 
-// Pulsanti navigazione randagi
+
+// ==========================================
+// EVENT LISTENERS PULSANTI NAVIGAZIONE
+// ==========================================
+
+// Pulsante Focolai
+if (btnFocolai) btnFocolai.onclick = () => {
+    homeView.classList.add('hidden');
+    if (randagiContainer) randagiContainer.classList.add('hidden');
+    // *** FIX: Nascondi anche lo swipe
+    mapSwipeContainer.classList.add('hidden');
+    destroySwipeMap();
+
+    mapFocolaiContainer.classList.remove('hidden');
+    destroyRandagiMap();
+    initFocolaiMap();
+    loadFocolai();
+};
+
+if (btnBack) btnBack.onclick = () => {
+    mapFocolaiContainer.classList.add('hidden');
+    homeView.classList.remove('hidden');
+    destroyFocolaiMap();
+};
+
+// Pulsante Randagi
 if (btnRandagi) btnRandagi.onclick = () => {
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');
-    // distruggi focolai per evitare sovrapposizioni con la mappa randagi
+    // *** FIX: Nascondi anche lo swipe
+    mapSwipeContainer.classList.add('hidden');
+    destroySwipeMap();
+
     destroyFocolaiMap();
     randagiContainer.classList.remove('hidden');
-    // Carica i dati e costruisci i grafici
     loadRandagiData();
 };
 
 if (btnRandagiBack) btnRandagiBack.onclick = () => {
     randagiContainer.classList.add('hidden');
     homeView.classList.remove('hidden');
-    // distruggi mappa randagi quando torni
     destroyRandagiMap();
 };
+
+// *** NUOVO: Pulsanti Swipe Map ***
+if (btnSwipe) {
+  btnSwipe.onclick = () => {
+    // 1. Nascondi le altre viste
+    homeView.classList.add('hidden');
+    mapFocolaiContainer.classList.add('hidden');
+    if (randagiContainer) randagiContainer.classList.add('hidden');
+
+    // 2. Pulisci le altre mappe
+    destroyFocolaiMap();
+    destroyRandagiMap();
+
+    // 3. Mostra il contenitore Swipe
+    mapSwipeContainer.classList.remove('hidden');
+
+    // 4. Inizializza la mappa Swipe
+    initSwipeMap();
+    loadSwipeMap();
+  };
+}
+
+if (btnSwipeBack) {
+  btnSwipeBack.onclick = () => {
+    // 1. Nascondi container Swipe
+    mapSwipeContainer.classList.add('hidden');
+
+    // 2. Mostra la Home
+    homeView.classList.remove('hidden');
+
+    // 3. Distruggi la mappa Swipe per pulizia
+    destroySwipeMap();
+  };
+}

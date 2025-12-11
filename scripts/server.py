@@ -364,6 +364,11 @@ def api_fauna_heatmap():
     return _serve_geojson_safe('Fauna Selvatica -Heatmap.geojson')
 
 
+@app.route('/api/geojson/animali_difficili')
+def api_quartieri_intake():
+    return _serve_geojson_safe('animali_difficili.geojson')
+
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

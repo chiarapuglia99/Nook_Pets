@@ -12,99 +12,56 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+
   <link rel="stylesheet" href="/css/styles.css">
 
-  <!-- Leaflet Side-by-Side for swipe map -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.css" />
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-  <!-- Chart.js CDN per grafici sezione animali randagi -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-
-  <!-- Side-by-side plugin e heatmap -->
-  <script src="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <script src="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.min.js"></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 
   <style>
-    /* 1. Applica il font rotondo al logo e ai titoli */
-    .brand-text, h1, h2 {
-      font-family: 'Fredoka', sans-serif;
-    }
+    /* --- STILI ESISTENTI (NON TOCCATI) --- */
+    .brand-text, h1, h2 { font-family: 'Fredoka', sans-serif; }
+    .brand-text { font-size: 1.5rem; letter-spacing: -0.5px; }
+    .text-nook { color: var(--primary, #0066ff); }
+    .text-pets { color: var(--accent, #ffb703); margin-left: 2px; }
+    .hero-content h1 { font-size: 2.8rem; line-height: 1.1; color: #07204a; margin-bottom: 16px; }
 
-    /* 2. Stile avanzato per il Brand (Logo) */
-    .brand-text {
-      font-size: 1.5rem; /* Un po' più grande */
-      letter-spacing: -0.5px;
-    }
-    .text-nook {
-      color: var(--primary, #0066ff); /* Blu */
-    }
-    .text-pets {
-      color: var(--accent, #ffb703); /* Giallo/Oro */
-      margin-left: 2px;
-    }
+    .highlight { position: relative; white-space: nowrap; z-index: 1; padding: 0 4px; }
+    .highlight::after { content: ''; position: absolute; bottom: 2px; left: 0; width: 100%; height: 35%; background-color: rgba(255, 183, 3, 0.4); z-index: -1; border-radius: 4px; transform: rotate(-2deg); }
 
-    /* 3. Stile avanzato per il Titolo Principale (Hero) */
-    .hero-content h1 {
-      font-size: 2.8rem; /* Molto più grande e leggibile */
-      line-height: 1.1;
-      color: #07204a;
-      margin-bottom: 16px;
-    }
+    @media (max-width: 768px) { .hero-content h1 { font-size: 2rem; } }
 
-    /* Effetto "Evidenziatore" per le parole chiave */
-    .highlight {
-      position: relative;
-      white-space: nowrap;
-      z-index: 1;
-      padding: 0 4px;
-    }
-    .highlight::after {
-      content: '';
-      position: absolute;
-      bottom: 2px;
-      left: 0;
-      width: 100%;
-      height: 35%; /* Altezza dell'evidenziazione */
-      background-color: rgba(255, 183, 3, 0.4); /* Giallo trasparente */
-      z-index: -1;
-      border-radius: 4px;
-      transform: rotate(-2deg); /* Leggera inclinazione per renderlo naturale */
-    }
-
-    /* Adattamento mobile per il titolo grande */
-    @media (max-width: 768px) {
-      .hero-content h1 { font-size: 2rem; }
-    }
-
-    /* Chart wrappers per la sezione randagi: rendono i canvas responsive e leggermente più piccoli */
-    .chart-wrapper {
-      width: 100%;
-      height: 280px; /* leggermente più piccolo */
-      border-radius: 8px;
-      overflow: hidden;
-      background: #fff;
-      padding: 8px;
-      box-shadow: 0 4px 12px rgba(2,6,23,0.04);
-      box-sizing: border-box;
-    }
-    @media (max-width: 900px) {
-      .chart-wrapper { height: 220px; }
-    }
-    @media (max-width: 420px) {
-      .chart-wrapper { height: 180px; }
-    }
-    /* forza il canvas ad adattarsi al contenitore */
+    /* Wrapper grafici Randagi */
+    .chart-wrapper { width: 100%; height: 280px; border-radius: 8px; overflow: hidden; background: #fff; padding: 8px; box-shadow: 0 4px 12px rgba(2,6,23,0.04); box-sizing: border-box; }
+    @media (max-width: 900px) { .chart-wrapper { height: 220px; } }
+    @media (max-width: 420px) { .chart-wrapper { height: 180px; } }
     .chart-wrapper canvas { width: 100% !important; height: 100% !important; display: block; }
 
-    /* piccoli aggiustamenti per la mappa focolai in modalità swipe */
+    /* Mappa Focolai style override */
     .map-focolai { height: 520px; border-radius:8px; }
 
+    /* --- NUOVO STILE: Legenda Animali Difficili --- */
+    .legend-difficili {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 12px;
+        border-radius: 8px;
+        box-shadow: 0 0 15px rgba(0,0,0,0.1);
+        color: #333;
+        margin-top: 10px;
+        font-family: 'Inter', sans-serif;
+        border: 1px solid rgba(0,0,0,0.1);
+    }
+    /* Nasconde il routing container di default */
+    .leaflet-routing-container { display: none !important; }
   </style>
 </head>
 <body>
   <main class="container">
+
     <nav class="topbar">
       <div class="brand">
         <svg class="paw" width="28" height="28" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
@@ -121,6 +78,8 @@
         <button id="btn-focolai" class="linkish">Visualizza focolai</button>
         <button id="btn-randagi" class="linkish">Animali randagi</button>
         <button id="btn-swipe" class="linkish">Swipe Map (Confronto)</button>
+
+        <button id="btn-difficili" class="linkish" style="color:#c2410c;">Animali Difficili</button>
       </div>
     </nav>
 
@@ -128,7 +87,6 @@
       <header class="hero">
         <div class="hero-content">
           <h1>Trova il <span class="highlight">rifugio</span> più vicino al tuo amico a quattro zampe</h1>
-
           <p class="lead">Inserisci il tuo indirizzo e ti guideremo verso la sicurezza.</p>
           <div class="hero-illustration" aria-hidden></div>
         </div>
@@ -163,34 +121,28 @@
     <section id="map-focolai-container" class="map-focolai-container hidden">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <h2>Mappa Focolai</h2>
-        <button id="btn-back" class="linkish" style="font-size:0.9rem;">&larr; Torna alla ricerca</button>
+        <button id="btn-back" class="linkish" style="font-size:0.9rem;">← Torna alla ricerca</button>
       </div>
-
       <div id="map-focolai" class="map map-focolai" aria-label="Mappa focolai"></div>
       <div id="legend-focolai" class="legend-focolai" aria-hidden="true"></div>
     </section>
 
-    <!-- Sezione separata per la Swipe Map / Confronto -->
     <section id="map-swipe-container" class="map-swipe-container hidden">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <h2>Swipe Map - Confronto</h2>
-        <button id="btn-swipe-back" class="linkish" style="font-size:0.9rem;">&larr; Torna alla ricerca</button>
+        <button id="btn-swipe-back" class="linkish" style="font-size:0.9rem;">← Torna alla ricerca</button>
       </div>
-
       <div id="map-swipe" class="map map-swipe" aria-label="Swipe Map" style="height:520px; border-radius:8px;"></div>
       <div id="legend-swipe" class="legend-focolai" aria-hidden="true" style="margin-top:8px"></div>
     </section>
 
-    <!-- Sezione Animali Randagi -->
     <section id="randagi-container" class="randagi-container hidden">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <h2>Animali Randagi</h2>
-        <button id="btn-randagi-back" class="linkish" style="font-size:0.9rem;">&larr; Torna</button>
+        <button id="btn-randagi-back" class="linkish" style="font-size:0.9rem;">← Torna</button>
       </div>
-
       <p id="randagi-feedback" class="feedback" aria-live="polite"></p>
 
-      <!-- Mappa Randagi -->
       <div id="map-randagi" class="map" style="height:420px; border-radius:8px; margin-bottom:12px;"></div>
 
       <div style="display:flex; gap:20px; flex-wrap:wrap;">
@@ -200,9 +152,23 @@
             <canvas id="randagi-pie"></canvas>
           </div>
         </div>
-
-        <!-- Nota: grafici a barre rimossi. L'animazione mese-per-mese apparirà sulla mappa. -->
       </div>
+    </section>
+
+    <section id="difficili-container" class="hidden" style="margin-top:18px; padding:18px; background:linear-gradient(180deg,#ffffff,#fbfbff); border-radius:14px; box-shadow:var(--shadow-sm);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <div>
+           <h2 style="margin:0; color:#c2410c;">Zone "Difficili"</h2>
+           <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
+               Analisi della durata media della permanenza in rifugio (Giorni prima dell'adozione)
+           </p>
+        </div>
+        <button id="btn-difficili-back" class="linkish" style="font-size:0.9rem;">← Torna</button>
+      </div>
+
+      <div id="map-difficili" class="map" style="height:520px; border-radius:8px; border:1px solid rgba(0,0,0,0.05);"></div>
+
+      <div id="legend-difficili" class="legend-difficili"></div>
     </section>
 
     <footer class="footer">
@@ -218,9 +184,9 @@
   </main>
 
   <script>
-      // Script per anno automatico footer
       document.getElementById('current-year').textContent = new Date().getFullYear();
   </script>
+
   <script src="/app.js"></script>
 </body>
 </html>

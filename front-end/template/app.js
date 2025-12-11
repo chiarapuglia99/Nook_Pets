@@ -647,6 +647,26 @@ function initSwipeMap() {
   }, 200);
 }
 
+// *** MODIFICA: Funzione Helper per creare il contenuto del Popup Swipe ***
+function createSwipePopupContent(p) {
+    // Le chiavi sono troncate nel GeoJSON (es. "Animal Name" -> "Animal Nam")
+    const nome = p['Animal Nam'] || 'Sconosciuto';
+    const intake = p['Intake Typ'] || 'N/A';
+    const col1 = p['Primary Co'] || 'N/A';
+    const col2 = p['Secondary'] || 'N/A'; // Nota: qui è solo "Secondary" senza "Color" o "Co"
+
+    return `
+      <div style="font-family: 'Fredoka', sans-serif; font-size: 0.9rem; min-width: 180px;">
+          <h4 style="margin: 0 0 8px 0; color: #d35400; border-bottom: 1px solid #eee; padding-bottom: 4px;">${nome}</h4>
+          <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px; font-size: 0.85rem;">
+              <strong style="color: #555;">Intake:</strong> <span>${intake}</span>
+              <strong style="color: #555;">Colore 1:</strong> <span>${col1}</span>
+              <strong style="color: #555;">Colore 2:</strong> <span>${col2}</span>
+          </div>
+      </div>
+    `;
+}
+
 async function loadSwipeMap() {
   if (!mapSwipe) return;
   showFeedback('Carico Swipe Map...', false, true);
@@ -660,8 +680,8 @@ async function loadSwipeMap() {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#ff7b7b', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
-          const content = `<div style="font-family:sans-serif; font-size:13px;"><div><b>Nome:</b> ${getVal(p,['Animal Name','name'])||'Senza nome'}</div><div><b>Tipo:</b> ${getVal(p,['Animal Type','animal_type'])||'N/A'}</div></div>`;
-          layer.bindPopup(content);
+          // Usa la funzione helper corretta con le chiavi troncate
+          layer.bindPopup(createSwipePopupContent(p));
           layer.on('click', () => layer.openPopup());
         }
       }).addTo(swipeLeftGroup);
@@ -677,8 +697,8 @@ async function loadSwipeMap() {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#7bdcff', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
-          const content = `<div style="font-family:sans-serif; font-size:13px;"><div><b>Nome:</b> ${getVal(p,['Animal Name','name'])||'Senza nome'}</div><div><b>Tipo:</b> ${getVal(p,['Animal Type','animal_type'])||'N/A'}</div></div>`;
-          layer.bindPopup(content);
+          // Usa la stessa logica popup anche qui
+          layer.bindPopup(createSwipePopupContent(p));
           layer.on('click', () => layer.openPopup());
         }
       }).addTo(swipeRightGroup);

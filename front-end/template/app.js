@@ -30,7 +30,7 @@ const randagiContainer = document.getElementById('randagi-container');
 const btnRandagiBack = document.getElementById('btn-randagi-back');
 const randagiFeedback = document.getElementById('randagi-feedback');
 
-// *** NUOVO: Elementi Vista Animali Difficili ***
+// Elementi Vista Animali Difficili
 const btnDifficili = document.getElementById('btn-difficili');
 const difficiliContainer = document.getElementById('difficili-container');
 const btnDifficiliBack = document.getElementById('btn-difficili-back');
@@ -62,7 +62,7 @@ let pieChart = null;
 let animatedLayerGroup = null;
 let randagiGlobalTimer = null;
 
-// *** NUOVO: Variabili Animali Difficili ***
+// Variabili Animali Difficili
 let mapDifficili = null;
 let difficiliLayer = null;
 
@@ -129,6 +129,37 @@ function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
       maxZoom: 19,
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
+
+    // GESTIONE CLICK SULLA MAPPA
+    map.on('click', async (e) => {
+        resetMap();
+        resultSection.classList.add('hidden');
+        if (typeof clearAutocomplete === 'function') clearAutocomplete();
+
+        const clickedLat = e.latlng.lat;
+        const clickedLng = e.latlng.lng;
+
+        userMarker = L.marker([clickedLat, clickedLng]).addTo(map).bindPopup('Posizione selezionata').openPopup();
+
+        indirizzoInput.value = "Recupero indirizzo...";
+
+        try {
+            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${clickedLat}&lon=${clickedLng}`);
+            if (!response.ok) throw new Error("Errore geocoding");
+
+            const data = await response.json();
+
+            if (data && data.display_name) {
+                indirizzoInput.value = data.display_name;
+            } else {
+                indirizzoInput.value = `${clickedLat.toFixed(5)}, ${clickedLng.toFixed(5)}`;
+            }
+        } catch (err) {
+            console.warn("Errore reverse geocoding:", err);
+            indirizzoInput.value = `${clickedLat.toFixed(5)}, ${clickedLng.toFixed(5)}`;
+        }
+    });
+
   } else {
     map.setView([lat, lng], zoom);
   }
@@ -381,6 +412,7 @@ function getVal(props, keys) {
     return null;
 }
 
+// CORREZIONE SPECIE: Aggiunto 'Animal Typ' alla lista delle chiavi
 function getAnimalInfo(props) {
     const rawType = getVal(props, ['Animal Typ', 'Animal Type', 'animal_type', 'Type', 'species']) || 'Other';
     const cleanType = String(rawType).toLowerCase();
@@ -589,7 +621,8 @@ function toggleType(key) {
                     else if (layer.getElement) layer.getElement().style.display = visible ? '' : 'none';
                     if (!visible) layer.closePopup && layer.closePopup();
                 }
-            } catch (e) {}
+            }
+            catch (e) {}
         });
     }
 
@@ -638,7 +671,6 @@ function initSwipeMap() {
   mapSwipe = L.map('map-swipe', { center: [34.0219, -118.4814], zoom: 11, layers: [urban] });
   swipeLeftGroup = L.layerGroup().addTo(mapSwipe);
   swipeRightGroup = L.layerGroup().addTo(mapSwipe);
-
   L.control.layers({ 'Urban': urban, 'Wild': wild }, {}).addTo(mapSwipe);
   wild.addTo(mapSwipe);
   setTimeout(() => {
@@ -651,7 +683,6 @@ function createSwipePopupContent(p) {
     const intake = p['Intake Typ'] || 'N/A';
     const col1 = p['Primary Co'] || 'N/A';
     const col2 = p['Secondary'] || 'N/A';
-
     return `
       <div style="font-family: 'Fredoka', sans-serif; font-size: 0.9rem; min-width: 180px;">
           <h4 style="margin: 0 0 8px 0; color: #d35400; border-bottom: 1px solid #eee; padding-bottom: 4px;">${nome}</h4>
@@ -865,6 +896,7 @@ function buildRandagiLegend(countsTipo) {
     });
 }
 
+// --- FUNZIONE MODIFICATA: CORRETTA SPECIE E COLONNE ---
 function buildRandagiTable(features) {
     if (!randagiContainer) return;
     let existing = document.getElementById('randagi-table-container');
@@ -873,11 +905,25 @@ function buildRandagiTable(features) {
     const container = document.createElement('div');
     container.id = 'randagi-table-container';
     Object.assign(container.style, { marginTop: '12px', background: '#fff', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' });
+
     const table = document.createElement('table');
-    table.style.width = '100%'; table.style.borderCollapse = 'collapse';
-    table.innerHTML = `<thead><tr><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Specie</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Data</th><th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Coordinate</th></tr></thead>`;
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+
+    // Header aggiornato: Rimosso Indirizzo Rifugio, tenuto solo Rifugio
+    table.innerHTML = `<thead>
+        <tr>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Specie</th>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Data</th>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Rifugio</th>
+            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Coordinate</th>
+        </tr>
+    </thead>`;
+
     const tbody = document.createElement('tbody');
     const seen = new Set();
+
     (features || []).forEach(f => {
         try {
             const p = f.properties || {};
@@ -888,11 +934,25 @@ function buildRandagiTable(features) {
             const coords = extractCoords(geom) || [];
             const coordStr = coords.length >= 2 ? `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}` : '';
             const key = id ? String(id) : `${String(name).trim().toLowerCase()}|${String(date).trim()}|${coordStr}`;
-            if (seen.has(key)) return; seen.add(key);
-            let specie = getVal(p, ['species','type','animal_type','Animal Type']) || '';
+
+            if (seen.has(key)) return;
+            seen.add(key);
+
+            // CORRETTO: Aggiunto 'Animal Typ' alla lista
+            let specie = getVal(p, ['species','type','animal_type','Animal Type', 'Animal Typ']) || '';
             specie = translateSpeciesKeyToItalian(specie.toLowerCase());
+
+            // Estrazione dati rifugio
+            let shelter = getVal(p, ['Shelter_Na', 'Shelter_Name', 'Shelter Name', 'shelter_name']) || 'N/A';
+
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td style="padding:6px; border-bottom:1px solid #f3f3f3">${name || 'Senza nome'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${specie}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${date || '-'}</td><td style="padding:6px; border-bottom:1px solid #f3f3f3">${coordStr || '-'}</td>`;
+            tr.innerHTML = `
+                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${name || 'Senza nome'}</td>
+                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${specie}</td>
+                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${date || '-'}</td>
+                <td style="padding:6px; border-bottom:1px solid #f3f3f3; color:#0066ff; font-weight:500;">${shelter}</td>
+                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${coordStr || '-'}</td>
+            `;
             tbody.appendChild(tr);
         } catch (e) { }
     });
@@ -1049,7 +1109,7 @@ function animateRandagiByMonth(monthBuckets, opts = {}) {
 function getIntakeValue(props) {
     if (!props) return 0;
     // Cerca varianti del nome, includendo quello trovato nel file 'intake_dur_mean'
-    const val = props['intake_dur_mean'] ||  // <--- NOME ESATTO TROVATO NEL FILE
+    const val = props['intake_dur_mean'] ||
                 props['intake_duration_mean'] ||
                 props['intake_dur'] ||
                 props['intake_mea'] ||
@@ -1067,7 +1127,7 @@ function getDifficiliColor(d) {
            d > 30 ? '#FC4E2A' : // Medio-Alto
            d > 15 ? '#FD8D3C' : // Medio
            d > 0  ? '#FEB24C' : // Basso
-                    '#FFEDA0';  // Minimo
+                    '#FFEDA0'; // Minimo
 }
 
 function styleDifficili(feature) {
@@ -1099,11 +1159,9 @@ function onEachFeatureDifficili(feature, layer) {
         mouseout: resetHighlightDifficili,
         click: (e) => layer.openPopup()
     });
-
     // Recupera valore sicuro
     const rawVal = getIntakeValue(feature.properties);
     const giorni = Math.round(rawVal);
-
     // Recupera nome sicuro (gestisce varianti comuni)
     const nome = feature.properties.city || feature.properties.Name || feature.properties.name || feature.properties.NAME || "Zona";
 
@@ -1123,7 +1181,6 @@ function initDifficiliMap() {
 
     // IMPORTANTE: Centro su Los Angeles (Coordinate standard)
     mapDifficili = L.map('map-difficili').setView([34.0522, -118.2437], 10);
-
     // Usa CartoDB Positron (chiaro) per far risaltare la cloropletica
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap, © CartoDB',
@@ -1134,7 +1191,6 @@ function initDifficiliMap() {
 async function loadDifficiliData() {
     if (!mapDifficili) return;
     legendDifficiliEl.innerHTML = '<p style="font-size:0.9rem; color:#666;">Caricamento dati...</p>';
-
     try {
         console.log("Tentativo caricamento: /api/geojson/animali_difficili"); // DEBUG
 
@@ -1145,12 +1201,10 @@ async function loadDifficiliData() {
         console.log("Dati ricevuti:", data); // DEBUG: Vedi se arriva il JSON nella Console F12
 
         if (difficiliLayer) mapDifficili.removeLayer(difficiliLayer);
-
         difficiliLayer = L.geoJson(data, {
             style: styleDifficili,
             onEachFeature: onEachFeatureDifficili
         }).addTo(mapDifficili);
-
         // Se i dati ci sono, adatta lo zoom
         if (data.features && data.features.length > 0) {
             mapDifficili.fitBounds(difficiliLayer.getBounds());
@@ -1162,7 +1216,6 @@ async function loadDifficiliData() {
         }
 
         buildDifficiliLegend();
-
     } catch (e) {
         console.error("ERRORE CARICAMENTO:", e);
         legendDifficiliEl.innerHTML = '<p style="color:red;">Errore caricamento dati.<br>Controlla console (F12).</p>';
@@ -1170,7 +1223,7 @@ async function loadDifficiliData() {
 }
 
 function buildDifficiliLegend() {
-    legendDifficiliEl.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:0.9rem; text-transform:uppercase; color:#555;">Giorni di Attesa</h4>';
+    legendDifficiliEl.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:0.9rem; text-transform:uppercase; color:#555;">Giorni di Attesa prima dell\'adozione</h4>';
     const grades = [0, 15, 30, 45, 60, 90];
 
     grades.forEach((grade, i) => {
@@ -1231,7 +1284,6 @@ if (btnBack) btnBack.onclick = () => {
     homeView.classList.remove('hidden');
     destroyFocolaiMap();
 };
-
 // Pulsante Randagi
 if (btnRandagi) btnRandagi.onclick = () => {
     homeView.classList.add('hidden');
@@ -1251,7 +1303,6 @@ if (btnRandagiBack) btnRandagiBack.onclick = () => {
     homeView.classList.remove('hidden');
     destroyRandagiMap();
 };
-
 // Pulsante Swipe Map
 if (btnSwipe) btnSwipe.onclick = () => {
     homeView.classList.add('hidden');
@@ -1272,8 +1323,7 @@ if (btnSwipeBack) btnSwipeBack.onclick = () => {
     homeView.classList.remove('hidden');
     destroySwipeMap();
 };
-
-// *** NUOVO: Pulsante Animali Difficili ***
+// Pulsante Animali Difficili
 if (btnDifficili) btnDifficili.onclick = () => {
     // 1. Nascondi le altre viste
     homeView.classList.add('hidden');
@@ -1291,7 +1341,6 @@ if (btnDifficili) btnDifficili.onclick = () => {
     initDifficiliMap();
     loadDifficiliData();
 };
-
 if (btnDifficiliBack) btnDifficiliBack.onclick = () => {
     difficiliContainer.classList.add('hidden');
     homeView.classList.remove('hidden');

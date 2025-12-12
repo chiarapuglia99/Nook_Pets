@@ -19,7 +19,7 @@ const mapFocolaiContainer = document.getElementById('map-focolai-container');
 const legendFocolaiEl = document.getElementById('legend-focolai');
 const btnBack = document.getElementById('btn-back');
 
-// Elementi Vista Swipe Map
+// Elementi Vista Swipe Map (Confronto)
 const btnSwipe = document.getElementById('btn-swipe');
 const mapSwipeContainer = document.getElementById('map-swipe-container');
 const btnSwipeBack = document.getElementById('btn-swipe-back');
@@ -54,6 +54,9 @@ let centriFocolaiLayer = null;
 let mapSwipe = null;
 let swipeLeftGroup = null;
 let swipeRightGroup = null;
+// *** NUOVO: Variabili per analisi Radar (Dati Grezzi) ***
+let rawDomesticData = null;
+let rawWildData = null;
 
 // Variabili Randagi
 let mapRandagi = null;
@@ -130,7 +133,6 @@ function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
       attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // GESTIONE CLICK SULLA MAPPA
     map.on('click', async (e) => {
         resetMap();
         resultSection.classList.add('hidden');
@@ -140,15 +142,12 @@ function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
         const clickedLng = e.latlng.lng;
 
         userMarker = L.marker([clickedLat, clickedLng]).addTo(map).bindPopup('Posizione selezionata').openPopup();
-
         indirizzoInput.value = "Recupero indirizzo...";
 
         try {
             const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${clickedLat}&lon=${clickedLng}`);
             if (!response.ok) throw new Error("Errore geocoding");
-
             const data = await response.json();
-
             if (data && data.display_name) {
                 indirizzoInput.value = data.display_name;
             } else {
@@ -172,11 +171,9 @@ function resetMap() {
   if (routingControl) { map.removeControl(routingControl); routingControl = null; }
 }
 
-// Inizializza mappa vuota all'avvio
 initMap();
 animalImg.src = pickRandomMedia();
 
-// Handler Form Ricerca
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const indirizzo = indirizzoInput.value.trim();
@@ -412,7 +409,6 @@ function getVal(props, keys) {
     return null;
 }
 
-// CORREZIONE SPECIE: Aggiunto 'Animal Typ' alla lista delle chiavi
 function getAnimalInfo(props) {
     const rawType = getVal(props, ['Animal Typ', 'Animal Type', 'animal_type', 'Type', 'species']) || 'Other';
     const cleanType = String(rawType).toLowerCase();
@@ -662,7 +658,7 @@ function buildLegend() {
 }
 
 // ==========================================
-// 7. SWIPE MAP
+// 7. SWIPE MAP (CONFLITTO & RADAR)
 // ==========================================
 function initSwipeMap() {
   if (mapSwipe) { setTimeout(() => mapSwipe.invalidateSize(), 100); return; }
@@ -678,6 +674,7 @@ function initSwipeMap() {
   }, 200);
 }
 
+// *** MODIFICA: Funzione Helper per Popup con chiavi corrette (troncate) ***
 function createSwipePopupContent(p) {
     const nome = p['Animal Nam'] || 'Sconosciuto';
     const intake = p['Intake Typ'] || 'N/A';
@@ -695,38 +692,47 @@ function createSwipePopupContent(p) {
     `;
 }
 
+// *** MODIFICA: Caricamento dati con salvataggio per Radar ***
 async function loadSwipeMap() {
   if (!mapSwipe) return;
   showFeedback('Carico Swipe Map...', false, true);
   try {
+    // 1. Carica Animali Domestici (SX)
     const resLeft = await fetch('/api/geojson/Animali Domestici.geojson');
     if (resLeft.ok) {
       const data = await resLeft.json();
+      rawDomesticData = data.features; // Salva dati grezzi
       swipeLeftGroup.clearLayers();
       L.geoJSON(data, {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#ff7b7b', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           layer.bindPopup(createSwipePopupContent(p));
-          layer.on('click', () => layer.openPopup());
+          // Previene che il click sul marker attivi anche il click sulla mappa (Radar)
+          layer.on('click', L.DomEvent.stopPropagation);
         }
       }).addTo(swipeLeftGroup);
     }
 
+    // 2. Carica Fauna Selvatica (DX)
     const resRight = await fetch('/api/geojson/Fauna Selvatica.geojson');
     const resHeat = await fetch('/api/geojson/Fauna Selvatica -Heatmap.geojson');
+
     swipeRightGroup.clearLayers();
     if (resRight.ok) {
       const data = await resRight.json();
+      rawWildData = data.features; // Salva dati grezzi
       L.geoJSON(data, {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#7bdcff', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           layer.bindPopup(createSwipePopupContent(p));
-          layer.on('click', () => layer.openPopup());
+          // Previene che il click sul marker attivi anche il click sulla mappa (Radar)
+          layer.on('click', L.DomEvent.stopPropagation);
         }
       }).addTo(swipeRightGroup);
     }
+
     if (resHeat.ok) {
       const heatData = await resHeat.json();
       const heatPoints = [];
@@ -736,6 +742,9 @@ async function loadSwipeMap() {
       }
       if (heatPoints.length) L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 17 }).addTo(swipeRightGroup);
     }
+
+    // *** NUOVO: Listener per Radar di Conflitto ***
+    mapSwipe.on('click', onSwipeMapClick);
 
     showFeedback('Swipe Map caricata.');
   } catch (e) {
@@ -747,12 +756,102 @@ async function loadSwipeMap() {
 function destroySwipeMap() {
   try {
     if (mapSwipe) {
+      // Rimuovi listener
+      mapSwipe.off('click', onSwipeMapClick);
       if (swipeLeftGroup) try { swipeLeftGroup.clearLayers(); } catch(e){}
       if (swipeRightGroup) try { swipeRightGroup.clearLayers(); } catch(e){}
       mapSwipe.remove();
       mapSwipe = null; swipeLeftGroup = null; swipeRightGroup = null;
+      // Resetta dati grezzi
+      rawDomesticData = null;
+      rawWildData = null;
     }
   } catch (e) { console.warn('destroySwipeMap error', e); }
+}
+
+// --- FUNZIONI MATEMATICHE PER RADAR DI CONFLITTO ---
+
+// Calcola distanza in km tra due coordinate
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Raggio Terra in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
+
+// Gestore click per Analisi Radar
+function onSwipeMapClick(e) {
+    if (!rawDomesticData || !rawWildData) return;
+
+    const lat = e.latlng.lat;
+    const lng = e.latlng.lng;
+    const raggioKm = 1.5;
+
+    // Conta domestici
+    let countDom = 0;
+    rawDomesticData.forEach(f => {
+        const c = extractCoords(f.geometry);
+        if (c) {
+            const d = getDistanceFromLatLonInKm(lat, lng, c[0], c[1]);
+            if (d <= raggioKm) countDom++;
+        }
+    });
+
+    // Conta selvatici
+    let countWild = 0;
+    rawWildData.forEach(f => {
+        const c = extractCoords(f.geometry);
+        if (c) {
+            const d = getDistanceFromLatLonInKm(lat, lng, c[0], c[1]);
+            if (d <= raggioKm) countWild++;
+        }
+    });
+
+    let verdetto = "";
+    let coloreVerdetto = "#333";
+
+    if (countDom === 0 && countWild === 0) {
+        verdetto = "Nessuna attività rilevata.";
+    } else if (countDom > countWild * 1.5) {
+        verdetto = "Prevalenza: 🏠 ANIMALI DOMESTICI";
+        coloreVerdetto = "#d35400"; // Arancio
+    } else if (countWild > countDom * 1.5) {
+        verdetto = "Prevalenza: 🌲 FAUNA SELVATICA";
+        coloreVerdetto = "#2980b9"; // Blu
+    } else {
+        verdetto = "⚠️ ZONA DI CONFLITTO (Misto)";
+        coloreVerdetto = "#8e44ad"; // Viola
+    }
+
+    L.popup()
+        .setLatLng(e.latlng)
+        .setContent(`
+            <div style="font-family:'Fredoka',sans-serif; text-align:center; min-width:200px;">
+                <h4 style="margin:0 0 10px 0; border-bottom:1px solid #eee; padding-bottom:5px;">Analisi di Zona (1.5 km)</h4>
+                <div style="display:flex; justify-content:space-around; margin-bottom:10px;">
+                    <div style="color:#d35400;">
+                        <div style="font-size:1.2rem; font-weight:bold;">${countDom}</div>
+                        <div style="font-size:0.8rem;">Domestici</div>
+                    </div>
+                    <div style="color:#2980b9;">
+                        <div style="font-size:1.2rem; font-weight:bold;">${countWild}</div>
+                        <div style="font-size:0.8rem;">Selvatici</div>
+                    </div>
+                </div>
+                <div style="background:${coloreVerdetto}; color:white; padding:5px; border-radius:4px; font-weight:bold; font-size:0.9rem;">
+                    ${verdetto}
+                </div>
+            </div>
+        `)
+        .openOn(mapSwipe);
 }
 
 // ==========================================
@@ -896,7 +995,6 @@ function buildRandagiLegend(countsTipo) {
     });
 }
 
-// --- FUNZIONE MODIFICATA: CORRETTA SPECIE E COLONNE ---
 function buildRandagiTable(features) {
     if (!randagiContainer) return;
     let existing = document.getElementById('randagi-table-container');
@@ -910,7 +1008,6 @@ function buildRandagiTable(features) {
     table.style.width = '100%';
     table.style.borderCollapse = 'collapse';
 
-    // Header aggiornato: Rimosso Indirizzo Rifugio, tenuto solo Rifugio
     table.innerHTML = `<thead>
         <tr>
             <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th>
@@ -938,11 +1035,9 @@ function buildRandagiTable(features) {
             if (seen.has(key)) return;
             seen.add(key);
 
-            // CORRETTO: Aggiunto 'Animal Typ' alla lista
             let specie = getVal(p, ['species','type','animal_type','Animal Type', 'Animal Typ']) || '';
             specie = translateSpeciesKeyToItalian(specie.toLowerCase());
 
-            // Estrazione dati rifugio
             let shelter = getVal(p, ['Shelter_Na', 'Shelter_Name', 'Shelter Name', 'shelter_name']) || 'N/A';
 
             const tr = document.createElement('tr');
@@ -1105,10 +1200,8 @@ function animateRandagiByMonth(monthBuckets, opts = {}) {
 // 9. SEZIONE ANIMALI DIFFICILI (CORRETTO & ROBUSTO)
 // ==========================================
 
-// Funzione helper per trovare il valore giusto anche se QGIS ha tagliato il nome
 function getIntakeValue(props) {
     if (!props) return 0;
-    // Cerca varianti del nome, includendo quello trovato nel file 'intake_dur_mean'
     const val = props['intake_dur_mean'] ||
                 props['intake_duration_mean'] ||
                 props['intake_dur'] ||
@@ -1119,19 +1212,17 @@ function getIntakeValue(props) {
     return Number(val);
 }
 
-// Scala colori in base alla media intake duration (giorni)
 function getDifficiliColor(d) {
-    return d > 90 ? '#800026' : // Molto critico
-           d > 60 ? '#BD0026' : // Critico
-           d > 45 ? '#E31A1C' : // Alto
-           d > 30 ? '#FC4E2A' : // Medio-Alto
-           d > 15 ? '#FD8D3C' : // Medio
-           d > 0  ? '#FEB24C' : // Basso
-                    '#FFEDA0'; // Minimo
+    return d > 90 ? '#800026' :
+           d > 60 ? '#BD0026' :
+           d > 45 ? '#E31A1C' :
+           d > 30 ? '#FC4E2A' :
+           d > 15 ? '#FD8D3C' :
+           d > 0  ? '#FEB24C' :
+                    '#FFEDA0';
 }
 
 function styleDifficili(feature) {
-    // Usiamo la funzione helper sicura
     const val = getIntakeValue(feature.properties);
     return {
         fillColor: getDifficiliColor(val),
@@ -1159,10 +1250,8 @@ function onEachFeatureDifficili(feature, layer) {
         mouseout: resetHighlightDifficili,
         click: (e) => layer.openPopup()
     });
-    // Recupera valore sicuro
     const rawVal = getIntakeValue(feature.properties);
     const giorni = Math.round(rawVal);
-    // Recupera nome sicuro (gestisce varianti comuni)
     const nome = feature.properties.city || feature.properties.Name || feature.properties.name || feature.properties.NAME || "Zona";
 
     const popupContent = `
@@ -1178,10 +1267,7 @@ function onEachFeatureDifficili(feature, layer) {
 
 function initDifficiliMap() {
     if (mapDifficili) { setTimeout(() => mapDifficili.invalidateSize(), 100); return; }
-
-    // IMPORTANTE: Centro su Los Angeles (Coordinate standard)
     mapDifficili = L.map('map-difficili').setView([34.0522, -118.2437], 10);
-    // Usa CartoDB Positron (chiaro) per far risaltare la cloropletica
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap, © CartoDB',
         maxZoom: 19
@@ -1192,29 +1278,20 @@ async function loadDifficiliData() {
     if (!mapDifficili) return;
     legendDifficiliEl.innerHTML = '<p style="font-size:0.9rem; color:#666;">Caricamento dati...</p>';
     try {
-        console.log("Tentativo caricamento: /api/geojson/animali_difficili"); // DEBUG
-
         const res = await fetch('/api/geojson/animali_difficili');
         if (!res.ok) throw new Error(`Errore Server: ${res.status}`);
 
         const data = await res.json();
-        console.log("Dati ricevuti:", data); // DEBUG: Vedi se arriva il JSON nella Console F12
-
         if (difficiliLayer) mapDifficili.removeLayer(difficiliLayer);
         difficiliLayer = L.geoJson(data, {
             style: styleDifficili,
             onEachFeature: onEachFeatureDifficili
         }).addTo(mapDifficili);
-        // Se i dati ci sono, adatta lo zoom
         if (data.features && data.features.length > 0) {
             mapDifficili.fitBounds(difficiliLayer.getBounds());
-            // DEBUG: Stampa le proprietà del primo elemento per controllare i nomi
-            console.log("Proprietà primo elemento (Controlla qui i nomi corretti):", data.features[0].properties);
         } else {
-            console.warn("GeoJSON vuoto o senza features");
             legendDifficiliEl.innerHTML = '<p style="color:orange;">Nessun dato trovato nel file.</p>';
         }
-
         buildDifficiliLegend();
     } catch (e) {
         console.error("ERRORE CARICAMENTO:", e);
@@ -1225,24 +1302,20 @@ async function loadDifficiliData() {
 function buildDifficiliLegend() {
     legendDifficiliEl.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:0.9rem; text-transform:uppercase; color:#555;">Giorni di Attesa prima dell\'adozione</h4>';
     const grades = [0, 15, 30, 45, 60, 90];
-
     grades.forEach((grade, i) => {
         const row = document.createElement('div');
         row.style.display = 'flex';
         row.style.alignItems = 'center';
         row.style.marginBottom = '5px';
-
         const colorBox = document.createElement('span');
         colorBox.style.background = getDifficiliColor(grade + 1);
         colorBox.style.width = '18px';
         colorBox.style.height = '18px';
         colorBox.style.marginRight = '8px';
         colorBox.style.border = '1px solid #ccc';
-
         const text = document.createElement('span');
         text.style.fontSize = '0.9rem';
         text.innerHTML = grade + (grades[i + 1] ? '–' + grades[i + 1] : '+');
-
         row.appendChild(colorBox);
         row.appendChild(text);
         legendDifficiliEl.appendChild(row);
@@ -1269,11 +1342,11 @@ if (btnFocolai) btnFocolai.onclick = () => {
     homeView.classList.add('hidden');
     if (randagiContainer) randagiContainer.classList.add('hidden');
     mapSwipeContainer.classList.add('hidden');
-    difficiliContainer.classList.add('hidden'); // Nascondi Difficili
+    difficiliContainer.classList.add('hidden');
 
     destroySwipeMap();
     destroyRandagiMap();
-    destroyDifficiliMap(); // Distruggi Difficili
+    destroyDifficiliMap();
 
     mapFocolaiContainer.classList.remove('hidden');
     initFocolaiMap();
@@ -1289,11 +1362,11 @@ if (btnRandagi) btnRandagi.onclick = () => {
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');
     mapSwipeContainer.classList.add('hidden');
-    difficiliContainer.classList.add('hidden'); // Nascondi Difficili
+    difficiliContainer.classList.add('hidden');
 
     destroySwipeMap();
     destroyFocolaiMap();
-    destroyDifficiliMap(); // Distruggi Difficili
+    destroyDifficiliMap();
 
     randagiContainer.classList.remove('hidden');
     loadRandagiData();
@@ -1308,11 +1381,11 @@ if (btnSwipe) btnSwipe.onclick = () => {
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');
     if (randagiContainer) randagiContainer.classList.add('hidden');
-    difficiliContainer.classList.add('hidden'); // Nascondi Difficili
+    difficiliContainer.classList.add('hidden');
 
     destroyFocolaiMap();
     destroyRandagiMap();
-    destroyDifficiliMap(); // Distruggi Difficili
+    destroyDifficiliMap();
 
     mapSwipeContainer.classList.remove('hidden');
     initSwipeMap();
@@ -1325,18 +1398,15 @@ if (btnSwipeBack) btnSwipeBack.onclick = () => {
 };
 // Pulsante Animali Difficili
 if (btnDifficili) btnDifficili.onclick = () => {
-    // 1. Nascondi le altre viste
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');
     if (randagiContainer) randagiContainer.classList.add('hidden');
     mapSwipeContainer.classList.add('hidden');
 
-    // 2. Distruggi le altre mappe
     destroyFocolaiMap();
     destroyRandagiMap();
     destroySwipeMap();
 
-    // 3. Attiva vista Difficili
     difficiliContainer.classList.remove('hidden');
     initDifficiliMap();
     loadDifficiliData();

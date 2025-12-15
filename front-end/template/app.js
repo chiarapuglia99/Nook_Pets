@@ -37,7 +37,7 @@ const difficiliContainer = document.getElementById('difficili-container');
 const btnDifficiliBack = document.getElementById('btn-difficili-back');
 const legendDifficiliEl = document.getElementById('legend-difficili');
 
-// *** UPDATE UI: RINOMINA SWIPE MAP (Modificato) ***
+// *** UPDATE UI: RINOMINA SWIPE MAP ***
 if (btnSwipe) btnSwipe.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
 const swipeHeader = document.querySelector('#map-swipe-container h2');
 if (swipeHeader) swipeHeader.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
@@ -701,7 +701,7 @@ function createSwipePopupContent(p) {
     `;
 }
 
-// *** MODIFICA: Due legende separate con TESTI AGGIORNATI ***
+// *** MODIFICA: Due legende separate con TESTI AGGIORNATI E ZONA CONFLITTO RIMOSSA ***
 function buildSwipeLegend() {
     if (!legendSwipeEl) return;
 
@@ -717,7 +717,7 @@ function buildSwipeLegend() {
             </h4>
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                 <span style="width: 14px; height: 14px; background: ${colOwner}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); display: inline-block;"></span>
-                <span style="font-size: 0.85rem; color: #555;"><strong>OWNER SURRENDER</strong> (Animali Abbandonati)</span>
+                <span style="font-size: 0.85rem; color: #555;"><strong>OWNER SURRENDER</strong> (Domestici Abbandonati)</span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="width: 14px; height: 14px; background: ${colWild}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); display: inline-block;"></span>
@@ -751,17 +751,6 @@ function buildSwipeLegend() {
                     <div style="font-size: 0.85rem; color: #444; margin-top: 2px;">
                         Habitat naturale predominante.
                         <br><span style="color: #c0392b; font-weight: 500;">⚠️ Rischi:</span> Territorio ostile per animali abbandonati.
-                    </div>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 10px;">
-                <div style="min-width: 24px; height: 24px; background: ${colConflict}; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1);"></div>
-                <div>
-                    <strong style="color: ${colConflict}; font-size: 0.95rem;">⚠️ ZONA DI CONFLITTO</strong>
-                    <div style="font-size: 0.85rem; color: #444; margin-top: 2px;">
-                        Sovrapposizione Abbandoni/Selvatici.
-                        <br><span style="color: #c0392b; font-weight: 500;">⚠️ Pericolo:</span> Alta probabilità di predazione e malattie.
                     </div>
                 </div>
             </div>

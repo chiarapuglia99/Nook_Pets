@@ -19,10 +19,11 @@ const mapFocolaiContainer = document.getElementById('map-focolai-container');
 const legendFocolaiEl = document.getElementById('legend-focolai');
 const btnBack = document.getElementById('btn-back');
 
-// Elementi Vista Swipe Map (Confronto)
+// Elementi Vista Swipe Map (Prevalenza)
 const btnSwipe = document.getElementById('btn-swipe');
 const mapSwipeContainer = document.getElementById('map-swipe-container');
 const btnSwipeBack = document.getElementById('btn-swipe-back');
+const legendSwipeEl = document.getElementById('legend-swipe');
 
 // Elementi Vista Randagi
 const btnRandagi = document.getElementById('btn-randagi');
@@ -35,6 +36,11 @@ const btnDifficili = document.getElementById('btn-difficili');
 const difficiliContainer = document.getElementById('difficili-container');
 const btnDifficiliBack = document.getElementById('btn-difficili-back');
 const legendDifficiliEl = document.getElementById('legend-difficili');
+
+// *** UPDATE UI: RINOMINA SWIPE MAP (Modificato) ***
+if (btnSwipe) btnSwipe.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
+const swipeHeader = document.querySelector('#map-swipe-container h2');
+if (swipeHeader) swipeHeader.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
 
 // ==========================================
 // 2. VARIABILI GLOBALI
@@ -54,9 +60,10 @@ let centriFocolaiLayer = null;
 let mapSwipe = null;
 let swipeLeftGroup = null;
 let swipeRightGroup = null;
-// *** NUOVO: Variabili per analisi Radar (Dati Grezzi) ***
-let rawDomesticData = null;
-let rawWildData = null;
+
+// *** Dati per analisi Radar ***
+let rawDomesticData = null; // Owner Surrender
+let rawWildData = null;     // Wildlife
 
 // Variabili Randagi
 let mapRandagi = null;
@@ -658,7 +665,7 @@ function buildLegend() {
 }
 
 // ==========================================
-// 7. SWIPE MAP (CONFLITTO & RADAR)
+// 7. SWIPE MAP (CONFRONTO OWNER SURRENDER vs WILDLIFE)
 // ==========================================
 function initSwipeMap() {
   if (mapSwipe) { setTimeout(() => mapSwipe.invalidateSize(), 100); return; }
@@ -674,9 +681,10 @@ function initSwipeMap() {
   }, 200);
 }
 
-// *** MODIFICA: Funzione Helper per Popup con chiavi corrette (troncate) ***
+// *** Helper per Popup con chiavi corrette (troncate) ***
 function createSwipePopupContent(p) {
     const nome = p['Animal Nam'] || 'Sconosciuto';
+    const tipo = p['Animal Typ'] || p['Animal Type'] || 'N/A';
     const intake = p['Intake Typ'] || 'N/A';
     const col1 = p['Primary Co'] || 'N/A';
     const col2 = p['Secondary'] || 'N/A';
@@ -684,6 +692,7 @@ function createSwipePopupContent(p) {
       <div style="font-family: 'Fredoka', sans-serif; font-size: 0.9rem; min-width: 180px;">
           <h4 style="margin: 0 0 8px 0; color: #d35400; border-bottom: 1px solid #eee; padding-bottom: 4px;">${nome}</h4>
           <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px; font-size: 0.85rem;">
+              <strong style="color: #555;">Tipo:</strong> <span>${tipo}</span>
               <strong style="color: #555;">Intake:</strong> <span>${intake}</span>
               <strong style="color: #555;">Colore 1:</strong> <span>${col1}</span>
               <strong style="color: #555;">Colore 2:</strong> <span>${col2}</span>
@@ -692,42 +701,109 @@ function createSwipePopupContent(p) {
     `;
 }
 
-// *** MODIFICA: Caricamento dati con salvataggio per Radar ***
+// *** MODIFICA: Due legende separate con TESTI AGGIORNATI ***
+function buildSwipeLegend() {
+    if (!legendSwipeEl) return;
+
+    // Colori Mappa
+    const colOwner = "#ff7b7b"; // ROSSO (Punti Mappa)
+    const colWild = "#7bdcff";  // BLU (Punti Mappa)
+    const colConflict = "#8e44ad"; // VIOLA (Risultato Analisi)
+
+    legendSwipeEl.innerHTML = `
+        <div style="background: white; padding: 12px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #eee; margin-bottom: 10px;">
+            <h4 style="margin: 0 0 8px 0; font-family: 'Fredoka', sans-serif; color: #333; font-size: 0.95rem; border-bottom: 2px solid #f3f4f6; padding-bottom: 5px;">
+                📍 Legenda Punti Mappa
+            </h4>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
+                <span style="width: 14px; height: 14px; background: ${colOwner}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); display: inline-block;"></span>
+                <span style="font-size: 0.85rem; color: #555;"><strong>OWNER SURRENDER</strong> (Animali Abbandonati)</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="width: 14px; height: 14px; background: ${colWild}; border-radius: 50%; border: 1px solid rgba(0,0,0,0.2); display: inline-block;"></span>
+                <span style="font-size: 0.85rem; color: #555;"><strong>WILDLIFE</strong> (Fauna Selvatica)</span>
+            </div>
+        </div>
+
+        <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #eee;">
+            <h4 style="margin: 0 0 12px 0; font-family: 'Fredoka', sans-serif; color: #333; border-bottom: 2px solid #f3f4f6; padding-bottom: 8px;">
+                🔍 Analisi Prevalenza (Click su Mappa)
+            </h4>
+            <p style="font-size: 0.85rem; color: #666; margin-bottom: 12px; font-style: italic;">
+                Clicca per analizzare il raggio di 1.5km:
+            </p>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <div style="min-width: 24px; height: 24px; background: ${colOwner}; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1);"></div>
+                <div>
+                    <strong style="color: ${colOwner}; font-size: 0.95rem;">Prevalenza: Fauna Abbandonata</strong>
+                    <div style="font-size: 0.85rem; color: #444; margin-top: 2px;">
+                        Alta concentrazione di abbandoni/rinunce.
+                        <br><span style="color: #c0392b; font-weight: 500;">⚠️ Rischi:</span> Smarrimento, incidenti, degrado urbano.
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+                <div style="min-width: 24px; height: 24px; background: ${colWild}; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1);"></div>
+                <div>
+                    <strong style="color: ${colWild}; font-size: 0.95rem;">Prevalenza: FAUNA SELVATICA</strong>
+                    <div style="font-size: 0.85rem; color: #444; margin-top: 2px;">
+                        Habitat naturale predominante.
+                        <br><span style="color: #c0392b; font-weight: 500;">⚠️ Rischi:</span> Territorio ostile per animali abbandonati.
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px;">
+                <div style="min-width: 24px; height: 24px; background: ${colConflict}; border-radius: 4px; border: 1px solid rgba(0,0,0,0.1);"></div>
+                <div>
+                    <strong style="color: ${colConflict}; font-size: 0.95rem;">⚠️ ZONA DI CONFLITTO</strong>
+                    <div style="font-size: 0.85rem; color: #444; margin-top: 2px;">
+                        Sovrapposizione Abbandoni/Selvatici.
+                        <br><span style="color: #c0392b; font-weight: 500;">⚠️ Pericolo:</span> Alta probabilità di predazione e malattie.
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    legendSwipeEl.classList.remove('hidden');
+}
+
+// Caricamento dati con FILE CORRETTO (Animali Domestici.geojson)
 async function loadSwipeMap() {
   if (!mapSwipe) return;
-  showFeedback('Carico Swipe Map...', false, true);
+  showFeedback('Carico Mappa Confronto...', false, true);
   try {
-    // 1. Carica Animali Domestici (SX)
+    // 1. Carica Animali Domestici (OWNER SURRENDER) - Sinistra
     const resLeft = await fetch('/api/geojson/Animali Domestici.geojson');
     if (resLeft.ok) {
       const data = await resLeft.json();
-      rawDomesticData = data.features; // Salva dati grezzi
+      rawDomesticData = data.features; // Salva dati
       swipeLeftGroup.clearLayers();
       L.geoJSON(data, {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#ff7b7b', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           layer.bindPopup(createSwipePopupContent(p));
-          // Previene che il click sul marker attivi anche il click sulla mappa (Radar)
           layer.on('click', L.DomEvent.stopPropagation);
         }
       }).addTo(swipeLeftGroup);
     }
 
-    // 2. Carica Fauna Selvatica (DX)
+    // 2. Carica Fauna Selvatica (WILDLIFE) - Destra
     const resRight = await fetch('/api/geojson/Fauna Selvatica.geojson');
     const resHeat = await fetch('/api/geojson/Fauna Selvatica -Heatmap.geojson');
 
     swipeRightGroup.clearLayers();
     if (resRight.ok) {
       const data = await resRight.json();
-      rawWildData = data.features; // Salva dati grezzi
+      rawWildData = data.features; // Salva dati
       L.geoJSON(data, {
         pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius:6, fillColor:'#7bdcff', color:'#fff', weight:1, fillOpacity:0.9 }),
         onEachFeature: (feature, layer) => {
           const p = feature.properties || {};
           layer.bindPopup(createSwipePopupContent(p));
-          // Previene che il click sul marker attivi anche il click sulla mappa (Radar)
           layer.on('click', L.DomEvent.stopPropagation);
         }
       }).addTo(swipeRightGroup);
@@ -743,10 +819,13 @@ async function loadSwipeMap() {
       if (heatPoints.length) L.heatLayer(heatPoints, { radius: 25, blur: 15, maxZoom: 17 }).addTo(swipeRightGroup);
     }
 
-    // *** NUOVO: Listener per Radar di Conflitto ***
+    // Listener per Radar di Conflitto
     mapSwipe.on('click', onSwipeMapClick);
 
-    showFeedback('Swipe Map caricata.');
+    // Costruzione Legenda (Doppia: Punti + Analisi)
+    buildSwipeLegend();
+
+    showFeedback('Mappa caricata.');
   } catch (e) {
     console.error(e);
     showFeedback('Errore caricamento Swipe Map.', true);
@@ -756,13 +835,11 @@ async function loadSwipeMap() {
 function destroySwipeMap() {
   try {
     if (mapSwipe) {
-      // Rimuovi listener
       mapSwipe.off('click', onSwipeMapClick);
       if (swipeLeftGroup) try { swipeLeftGroup.clearLayers(); } catch(e){}
       if (swipeRightGroup) try { swipeRightGroup.clearLayers(); } catch(e){}
       mapSwipe.remove();
       mapSwipe = null; swipeLeftGroup = null; swipeRightGroup = null;
-      // Resetta dati grezzi
       rawDomesticData = null;
       rawWildData = null;
     }
@@ -771,9 +848,8 @@ function destroySwipeMap() {
 
 // --- FUNZIONI MATEMATICHE PER RADAR DI CONFLITTO ---
 
-// Calcola distanza in km tra due coordinate
 function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Raggio Terra in km
+  const R = 6371;
   const dLat = deg2rad(lat2 - lat1);
   const dLon = deg2rad(lon2 - lon1);
   const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -787,7 +863,7 @@ function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
 
-// Gestore click per Analisi Radar
+// *** MODIFICA: Radar Logic (Owner Surrender vs Wildlife) ***
 function onSwipeMapClick(e) {
     if (!rawDomesticData || !rawWildData) return;
 
@@ -795,7 +871,7 @@ function onSwipeMapClick(e) {
     const lng = e.latlng.lng;
     const raggioKm = 1.5;
 
-    // Conta domestici
+    // Conta Owner Surrender (Domestic)
     let countDom = 0;
     rawDomesticData.forEach(f => {
         const c = extractCoords(f.geometry);
@@ -805,7 +881,7 @@ function onSwipeMapClick(e) {
         }
     });
 
-    // Conta selvatici
+    // Conta Wildlife
     let countWild = 0;
     rawWildData.forEach(f => {
         const c = extractCoords(f.geometry);
@@ -821,13 +897,13 @@ function onSwipeMapClick(e) {
     if (countDom === 0 && countWild === 0) {
         verdetto = "Nessuna attività rilevata.";
     } else if (countDom > countWild * 1.5) {
-        verdetto = "Prevalenza: 🏠 ANIMALI DOMESTICI";
-        coloreVerdetto = "#d35400"; // Arancio
+        verdetto = "Prevalenza: 🏠 OWNER SURRENDER";
+        coloreVerdetto = "#ff7b7b"; // Rosso
     } else if (countWild > countDom * 1.5) {
         verdetto = "Prevalenza: 🌲 FAUNA SELVATICA";
-        coloreVerdetto = "#2980b9"; // Blu
+        coloreVerdetto = "#7bdcff"; // Blu
     } else {
-        verdetto = "⚠️ ZONA DI CONFLITTO (Misto)";
+        verdetto = "⚠️ ZONA DI CONFLITTO";
         coloreVerdetto = "#8e44ad"; // Viola
     }
 
@@ -837,16 +913,16 @@ function onSwipeMapClick(e) {
             <div style="font-family:'Fredoka',sans-serif; text-align:center; min-width:200px;">
                 <h4 style="margin:0 0 10px 0; border-bottom:1px solid #eee; padding-bottom:5px;">Analisi di Zona (1.5 km)</h4>
                 <div style="display:flex; justify-content:space-around; margin-bottom:10px;">
-                    <div style="color:#d35400;">
+                    <div style="color:#ff7b7b;">
                         <div style="font-size:1.2rem; font-weight:bold;">${countDom}</div>
-                        <div style="font-size:0.8rem;">Domestici</div>
+                        <div style="font-size:0.8rem;">Abbandoni</div>
                     </div>
-                    <div style="color:#2980b9;">
+                    <div style="color:#7bdcff;">
                         <div style="font-size:1.2rem; font-weight:bold;">${countWild}</div>
                         <div style="font-size:0.8rem;">Selvatici</div>
                     </div>
                 </div>
-                <div style="background:${coloreVerdetto}; color:white; padding:5px; border-radius:4px; font-weight:bold; font-size:0.9rem;">
+                <div style="background:${coloreVerdetto}; color:${coloreVerdetto === '#7bdcff' ? '#333' : 'white'}; padding:5px; border-radius:4px; font-weight:bold; font-size:0.9rem;">
                     ${verdetto}
                 </div>
             </div>
@@ -1376,7 +1452,7 @@ if (btnRandagiBack) btnRandagiBack.onclick = () => {
     homeView.classList.remove('hidden');
     destroyRandagiMap();
 };
-// Pulsante Swipe Map
+// Pulsante Swipe Map (PREVALENZA DOMESTICI-SELVATICI)
 if (btnSwipe) btnSwipe.onclick = () => {
     homeView.classList.add('hidden');
     mapFocolaiContainer.classList.add('hidden');

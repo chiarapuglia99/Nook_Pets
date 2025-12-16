@@ -36,7 +36,7 @@ const btnDifficili = document.getElementById('btn-difficili');
 const difficiliContainer = document.getElementById('difficili-container');
 const btnDifficiliBack = document.getElementById('btn-difficili-back');
 
-// *** UPDATE UI: RINOMINA SWIPE MAP (Come da file caricato) ***
+// *** UPDATE UI: RINOMINA SWIPE MAP ***
 if (btnSwipe) btnSwipe.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
 const swipeHeader = document.querySelector('#map-swipe-container h2');
 if (swipeHeader) swipeHeader.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
@@ -815,42 +815,65 @@ function onSwipeMapClick(e) {
         }
     });
 
-    let verdetto = "";
+    // Logica aggiornata per i testi richiesti
+    let titoloPrevalenza = "";
+    let rischi = "";
     let coloreVerdetto = "#333";
 
     if (countDom === 0 && countWild === 0) {
-        verdetto = "Nessuna attività rilevata.";
-    } else if (countDom > countWild * 1.5) {
-        verdetto = "Prevalenza: 🏠 OWNER SURRENDER";
-        coloreVerdetto = "#ff7b7b"; // Rosso
-    } else if (countWild > countDom * 1.5) {
-        verdetto = "Prevalenza: 🌲 FAUNA SELVATICA";
-        coloreVerdetto = "#7bdcff"; // Blu
-    } else {
-        verdetto = "⚠️ ZONA DI CONFLITTO";
+        titoloPrevalenza = "NESSUNA ATTIVITÀ RILEVATA";
+        rischi = "Nessun rischio immediato";
+        coloreVerdetto = "#6b7280"; // Grigio
+    }
+    else if (countDom > countWild * 1.5) {
+        // CASO 1: Prevalenza Domestici
+        titoloPrevalenza = "PREVALENZA FAUNA ABBANDONATA";
+        rischi = "RISCHI: SMARRIMENTO";
+        coloreVerdetto = "#ff7b7b"; // Rosso chiaro (Owner Surrender)
+    }
+    else if (countWild > countDom * 1.5) {
+        // CASO 2: Prevalenza Selvatici
+        titoloPrevalenza = "PREVALENZA FAUNA SELVATICA";
+        rischi = "RISCHI: IMPATTO CON ATTIVITÀ UMANE";
+        coloreVerdetto = "#7bdcff"; // Azzurro (Wildlife)
+    }
+    else {
+        // CASO 3: Conflitto / Misto
+        titoloPrevalenza = "ZONA AD ALTA INTERAZIONE";
+        rischi = "RISCHI: CONFLITTO DOMESTICO-SELVATICO";
         coloreVerdetto = "#8e44ad"; // Viola
     }
 
-    L.popup()
-        .setLatLng(e.latlng)
-        .setContent(`
-            <div style="font-family:'Fredoka',sans-serif; text-align:center; min-width:200px;">
-                <h4 style="margin:0 0 10px 0; border-bottom:1px solid #eee; padding-bottom:5px;">Analisi di Zona (1.5 km)</h4>
-                <div style="display:flex; justify-content:space-around; margin-bottom:10px;">
-                    <div style="color:#ff7b7b;">
-                        <div style="font-size:1.2rem; font-weight:bold;">${countDom}</div>
-                        <div style="font-size:0.8rem;">Abbandoni</div>
-                    </div>
-                    <div style="color:#7bdcff;">
-                        <div style="font-size:1.2rem; font-weight:bold;">${countWild}</div>
-                        <div style="font-size:0.8rem;">Selvatici</div>
-                    </div>
+    // Costruzione HTML del Popup
+    const popupContent = `
+        <div style="font-family:'Fredoka',sans-serif; text-align:center; min-width:220px;">
+            <h4 style="margin:0 0 10px 0; border-bottom:1px solid #eee; padding-bottom:5px;">Analisi di Zona (1.5 km)</h4>
+            
+            <div style="display:flex; justify-content:space-around; margin-bottom:12px;">
+                <div style="color:#ff7b7b;">
+                    <div style="font-size:1.3rem; font-weight:bold;">${countDom}</div>
+                    <div style="font-size:0.75rem; text-transform:uppercase;">Abbandoni</div>
                 </div>
-                <div style="background:${coloreVerdetto}; color:${coloreVerdetto === '#7bdcff' ? '#333' : 'white'}; padding:5px; border-radius:4px; font-weight:bold; font-size:0.9rem;">
-                    ${verdetto}
+                <div style="color:#7bdcff;">
+                    <div style="font-size:1.3rem; font-weight:bold;">${countWild}</div>
+                    <div style="font-size:0.75rem; text-transform:uppercase;">Selvatici</div>
                 </div>
             </div>
-        `)
+
+            <div style="background:${coloreVerdetto}; color:${coloreVerdetto === '#7bdcff' ? '#0f172a' : 'white'}; padding:8px; border-radius:6px;">
+                <div style="font-weight:bold; font-size:0.95rem; line-height:1.2; margin-bottom:4px;">
+                    ${titoloPrevalenza}
+                </div>
+                <div style="font-size:0.85rem; opacity:0.9;">
+                    ${rischi}
+                </div>
+            </div>
+        </div>
+    `;
+
+    L.popup()
+        .setLatLng(e.latlng)
+        .setContent(popupContent)
         .openOn(mapSwipe);
 }
 

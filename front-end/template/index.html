@@ -12,51 +12,88 @@
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
   <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.css" />
 
   <link rel="stylesheet" href="/css/styles.css">
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.css" />
-
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <script src="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/leaflet-side-by-side/leaflet-side-by-side.min.js"></script>
   <script src="https://unpkg.com/leaflet.heat/dist/leaflet-heat.js"></script>
 
   <style>
-    /* --- STILI ESISTENTI (NON TOCCATI) --- */
-    .brand-text, h1, h2 { font-family: 'Fredoka', sans-serif; }
+    /* --- STILI DI SUPPORTO E OVERRIDES --- */
+    .brand-text, h1, h2, h3 { font-family: 'Fredoka', sans-serif; }
     .brand-text { font-size: 1.5rem; letter-spacing: -0.5px; }
     .text-nook { color: var(--primary, #0066ff); }
     .text-pets { color: var(--accent, #ffb703); margin-left: 2px; }
-    .hero-content h1 { font-size: 2.8rem; line-height: 1.1; color: #07204a; margin-bottom: 16px; }
 
+    .hero-content h1 { font-size: 2.8rem; line-height: 1.1; color: #07204a; margin-bottom: 16px; }
     .highlight { position: relative; white-space: nowrap; z-index: 1; padding: 0 4px; }
-    .highlight::after { content: ''; position: absolute; bottom: 2px; left: 0; width: 100%; height: 35%; background-color: rgba(255, 183, 3, 0.4); z-index: -1; border-radius: 4px; transform: rotate(-2deg); }
+    .highlight::after {
+        content: ''; position: absolute; bottom: 2px; left: 0; width: 100%;
+        height: 35%; background-color: rgba(255, 183, 3, 0.4);
+        z-index: -1; border-radius: 4px; transform: rotate(-2deg);
+    }
 
     @media (max-width: 768px) { .hero-content h1 { font-size: 2rem; } }
 
-    /* Wrapper grafici Randagi */
-    .chart-wrapper { width: 100%; height: 280px; border-radius: 8px; overflow: hidden; background: #fff; padding: 8px; box-shadow: 0 4px 12px rgba(2,6,23,0.04); box-sizing: border-box; }
+    /* Mappa Focolai & Swipe */
+    .map-focolai { height: 520px; border-radius: 8px; }
+
+    /* Nasconde il routing container di default */
+    .leaflet-routing-container { display: none !important; }
+
+    /* Wrapper Grafici */
+    .chart-wrapper {
+        width: 100%; height: 280px; border-radius: 8px; overflow: hidden;
+        background: #fff; padding: 8px; box-shadow: 0 4px 12px rgba(2,6,23,0.04);
+        box-sizing: border-box;
+    }
     @media (max-width: 900px) { .chart-wrapper { height: 220px; } }
     @media (max-width: 420px) { .chart-wrapper { height: 180px; } }
     .chart-wrapper canvas { width: 100% !important; height: 100% !important; display: block; }
 
-    /* Mappa Focolai style override */
-    .map-focolai { height: 520px; border-radius:8px; }
-
-    /* --- NUOVO STILE: Legenda Animali Difficili --- */
-    .legend-difficili {
-        background: rgba(255, 255, 255, 0.95);
-        padding: 12px;
-        border-radius: 8px;
-        box-shadow: 0 0 15px rgba(0,0,0,0.1);
-        color: #333;
-        margin-top: 10px;
-        font-family: 'Inter', sans-serif;
-        border: 1px solid rgba(0,0,0,0.1);
+    /* Wrapper Controlli Randagi */
+    .randagi-controls-wrapper {
+        display: flex; flex-wrap: wrap; gap: 15px; align-items: center;
+        background: #ffffff; padding: 10px 15px; border-radius: 8px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 15px;
+        border: 1px solid #e5e7eb; justify-content: space-between;
     }
-    /* Nasconde il routing container di default */
-    .leaflet-routing-container { display: none !important; }
+
+    .nav-group { display: flex; align-items: center; gap: 10px; }
+
+    .month-display {
+        font-family: 'Fredoka', sans-serif; font-size: 1.1rem;
+        font-weight: 600; color: #07204a; min-width: 140px;
+        text-align: center; user-select: none;
+    }
+
+    .btn-nav {
+        background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px;
+        padding: 6px 12px; cursor: pointer; font-size: 1rem;
+        transition: all 0.2s; display: flex; align-items: center;
+        justify-content: center; color: #374151;
+    }
+    .btn-nav:hover { background: #e5e7eb; border-color: #9ca3af; }
+    .btn-nav:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-play {
+        background: #ecfdf5; border-color: #6ee7b7; color: #065f46;
+        font-weight: 600; font-size: 0.9rem; margin-right: 10px;
+    }
+    .btn-play:hover { background: #d1fae5; }
+    .btn-play.active { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+
+    .randagi-legend-inline { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+
+    .highlight-row {
+        background-color: #fff7ed !important; border-left: 4px solid #f97316;
+        transition: background-color 0.3s;
+    }
+    #randagi-table-container { scroll-margin-top: 50px; }
   </style>
 </head>
 <body>
@@ -69,7 +106,6 @@
           <path d="M13.5 5.5c0 1.93-1.57 3.5-3.5 3.5S6.5 7.43 6.5 5.5 8.07 2 10 2s3.5 1.57 3.5 3.5z" fill="#FFB703" transform="translate(4 2)"/>
           <path d="M18 11.2c0 2.3-1.8 4.2-4 4.2s-4-1.9-4-4.2 1.8-4.2 4-4.2 4 1.9 4 4.2z" fill="#FFB703" transform="translate(0 4)"/>
         </svg>
-
         <span class="brand-text">
             <span class="text-nook">Nook</span><span class="text-pets">Pets</span>
         </span>
@@ -78,8 +114,7 @@
         <button id="btn-focolai" class="linkish">Visualizza focolai</button>
         <button id="btn-randagi" class="linkish">Animali randagi</button>
         <button id="btn-swipe" class="linkish">Swipe Map (Confronto)</button>
-
-        <button id="btn-difficili" class="linkish" style="color:#c2410c;">Animali Difficili</button>
+        <button id="btn-difficili" class="linkish" style="color:#c2410c;">Permanenza Rifugio Pre-Adozione</button>
       </div>
     </nav>
 
@@ -90,16 +125,13 @@
           <p class="lead">Inserisci il tuo indirizzo e ti guideremo verso la sicurezza.</p>
           <div class="hero-illustration" aria-hidden></div>
         </div>
-
         <form id="search-form" class="search-card">
           <label for="indirizzo" class="sr-only">Indirizzo</label>
           <input id="indirizzo" name="indirizzo" type="text" placeholder="Es. 4000 E Anaheim St, Long Beach" aria-label="Indirizzo">
           <button id="btn-submit" type="submit">Cerca</button>
         </form>
       </header>
-
       <section id="feedback" class="feedback" aria-live="polite"></section>
-
       <section id="result" class="result hidden">
         <h2>Rifugio più vicino</h2>
         <div class="card result-card">
@@ -114,7 +146,6 @@
           </div>
         </div>
       </section>
-
       <section id="map" class="map" aria-label="Mappa"></section>
     </div>
 
@@ -132,20 +163,17 @@
         <h2>Swipe Map - Confronto</h2>
         <button id="btn-swipe-back" class="linkish" style="font-size:0.9rem;">← Torna alla ricerca</button>
       </div>
+      <div id="legend-swipe" class="legend-focolai" aria-hidden="true" style="margin-bottom:8px"></div>
       <div id="map-swipe" class="map map-swipe" aria-label="Swipe Map" style="height:520px; border-radius:8px;"></div>
-      <div id="legend-swipe" class="legend-focolai" aria-hidden="true" style="margin-top:8px"></div>
     </section>
-
     <section id="randagi-container" class="randagi-container hidden">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <h2>Animali Randagi</h2>
         <button id="btn-randagi-back" class="linkish" style="font-size:0.9rem;">← Torna</button>
       </div>
       <p id="randagi-feedback" class="feedback" aria-live="polite"></p>
-
       <div id="map-randagi" class="map" style="height:420px; border-radius:8px; margin-bottom:12px;"></div>
-
-      <div style="display:flex; gap:20px; flex-wrap:wrap;">
+      <div style="display:flex; gap:20px; flex-wrap:wrap; margin-top: 15px;">
         <div style="flex:1 1 320px;">
           <h3 style="margin-top:0;">Distribuzione per sesso</h3>
           <div class="chart-wrapper">
@@ -158,17 +186,14 @@
     <section id="difficili-container" class="hidden" style="margin-top:18px; padding:18px; background:linear-gradient(180deg,#ffffff,#fbfbff); border-radius:14px; box-shadow:var(--shadow-sm);">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
         <div>
-           <h2 style="margin:0; color:#c2410c;">Zone che presentano animali con carattere "difficile"</h2>
+           <h2 style="margin:0; color:#c2410c;">Zone con animali "difficili"</h2>
            <p style="margin:4px 0 0 0; color:#666; font-size:0.95rem;">
-               Analisi della durata media della permanenza in rifugio (Giorni prima dell'adozione)
+               Analisi della durata media della permanenza in rifugio.
            </p>
         </div>
         <button id="btn-difficili-back" class="linkish" style="font-size:0.9rem;">← Torna</button>
       </div>
-
       <div id="map-difficili" class="map" style="height:520px; border-radius:8px; border:1px solid rgba(0,0,0,0.05);"></div>
-
-      <div id="legend-difficili" class="legend-difficili"></div>
     </section>
 
     <footer class="footer">

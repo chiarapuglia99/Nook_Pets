@@ -19,7 +19,7 @@ const mapFocolaiContainer = document.getElementById('map-focolai-container');
 const legendFocolaiEl = document.getElementById('legend-focolai');
 const btnBack = document.getElementById('btn-back');
 
-// Elementi Vista Swipe Map (Prevalenza)
+// Elementi Vista Swipe Map
 const btnSwipe = document.getElementById('btn-swipe');
 const mapSwipeContainer = document.getElementById('map-swipe-container');
 const btnSwipeBack = document.getElementById('btn-swipe-back');
@@ -35,9 +35,8 @@ const randagiFeedback = document.getElementById('randagi-feedback');
 const btnDifficili = document.getElementById('btn-difficili');
 const difficiliContainer = document.getElementById('difficili-container');
 const btnDifficiliBack = document.getElementById('btn-difficili-back');
-const legendDifficiliEl = document.getElementById('legend-difficili');
 
-// *** UPDATE UI: RINOMINA SWIPE MAP ***
+// *** UPDATE UI: RINOMINA SWIPE MAP (Come da file caricato) ***
 if (btnSwipe) btnSwipe.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
 const swipeHeader = document.querySelector('#map-swipe-container h2');
 if (swipeHeader) swipeHeader.textContent = "Analisi Prevalenza Animali Selvatici-Abbandonati";
@@ -50,31 +49,34 @@ let userMarker = null;
 let shelterMarker = null;
 let routingControl = null;
 
-// Variabili Focolai
+// Focolai
 let mapFocolai = null;
 let zoneLayer = null;
 let animaliLayer = null;
 let centriFocolaiLayer = null;
 
-// Variabili Swipe Map
+// Swipe Map
 let mapSwipe = null;
 let swipeLeftGroup = null;
 let swipeRightGroup = null;
-
-// *** Dati per analisi Radar ***
 let rawDomesticData = null; // Owner Surrender
 let rawWildData = null;     // Wildlife
 
-// Variabili Randagi
+// Randagi
 let mapRandagi = null;
-let randagiLayer = null;
 let pieChart = null;
-let animatedLayerGroup = null;
-let randagiGlobalTimer = null;
+let randagiDataFeatures = [];
+let monthBuckets = {};
+let sortedMonthKeys = [];
+let currentMonthIndex = 0;
+let animationTimer = null;
+let isAnimating = false;
+let randagiLayerGroup = null;
 
-// Variabili Animali Difficili
+// Animali Difficili
 let mapDifficili = null;
 let difficiliLayer = null;
+let difficiliLegendControl = null;
 
 // Pool immagini
 const animalMediaPool = [
@@ -84,6 +86,13 @@ const animalMediaPool = [
   '../utils/rabbit.gif',
   '../utils/all_normal.gif'
 ];
+
+// --- COSTANTI PER IL RECUPERO DATI ---
+const SHELTER_KEYS = ['Shelter_Na', 'Shelter_Name', 'Shelter Name', 'shelter', 'Location', 'Kennel', 'Jurisdicti', 'Jurisdiction'];
+const NAME_KEYS = ['Animal Nam', 'Animal Name', 'Animal_Name', 'name', 'Name'];
+const DATE_KEYS = ['Intake Dat', 'Intake Date', 'intake_date', 'date_found', 'Date'];
+const TYPE_KEYS = ['Animal Typ', 'Animal Type', 'species', 'type'];
+const SEX_KEYS  = ['Sex', 'Gender', 'sesso'];
 
 // ==========================================
 // 3. FUNZIONI UTILITY
@@ -129,15 +138,28 @@ window.copiaCoordinate = function(lat, lng) {
     });
 };
 
+function getVal(props, keys) {
+    if (!props) return null;
+    const propKeys = Object.keys(props);
+    for (let key of keys) {
+        if (props[key] !== undefined && props[key] !== null) return props[key];
+        const foundCase = propKeys.find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundCase && props[foundCase]) return props[foundCase];
+        const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const foundFuzzy = propKeys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanKey);
+        if (foundFuzzy && props[foundFuzzy]) return props[foundFuzzy];
+    }
+    return null;
+}
+
 // ==========================================
-// 4. LOGICA MAPPA PRINCIPALE (RICERCA)
+// 4. MAPPA PRINCIPALE & RICERCA
 // ==========================================
 function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
   if (!map) {
     map = L.map('map').setView([lat, lng], zoom);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
+      maxZoom: 19, attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
     map.on('click', async (e) => {
@@ -155,17 +177,13 @@ function initMap(lat = 34.0219, lng = -118.4814, zoom = 10) {
             const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${clickedLat}&lon=${clickedLng}`);
             if (!response.ok) throw new Error("Errore geocoding");
             const data = await response.json();
-            if (data && data.display_name) {
-                indirizzoInput.value = data.display_name;
-            } else {
-                indirizzoInput.value = `${clickedLat.toFixed(5)}, ${clickedLng.toFixed(5)}`;
-            }
+            if (data && data.display_name) indirizzoInput.value = data.display_name;
+            else indirizzoInput.value = `${clickedLat.toFixed(5)}, ${clickedLng.toFixed(5)}`;
         } catch (err) {
             console.warn("Errore reverse geocoding:", err);
             indirizzoInput.value = `${clickedLat.toFixed(5)}, ${clickedLng.toFixed(5)}`;
         }
     });
-
   } else {
     map.setView([lat, lng], zoom);
   }
@@ -179,84 +197,81 @@ function resetMap() {
 }
 
 initMap();
-animalImg.src = pickRandomMedia();
+if (animalImg) animalImg.src = pickRandomMedia();
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const indirizzo = indirizzoInput.value.trim();
-  if (!indirizzo) { showFeedback('Inserisci un indirizzo valido.', true); return; }
+if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const indirizzo = indirizzoInput.value.trim();
+      if (!indirizzo) { showFeedback('Inserisci un indirizzo valido.', true); return; }
 
-  setButtonLoading(true);
-  showFeedback('Sto cercando il rifugio più vicino...', false, true);
-  resultSection.classList.add('hidden');
+      setButtonLoading(true);
+      showFeedback('Sto cercando il rifugio più vicino...', false, true);
+      resultSection.classList.add('hidden');
 
-  try {
-    const resp = await fetch('/api/nearest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ indirizzo })
+      try {
+        const resp = await fetch('/api/nearest', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ indirizzo })
+        });
+        const json = await resp.json();
+        if (!resp.ok || !json.successo) {
+          showFeedback(json.messaggio || 'Indirizzo non trovato.', true);
+          setButtonLoading(false);
+          return;
+        }
+
+        const dati = json.dati_rifugio;
+        const coordUserRaw = json.coordinate_utente || [];
+        const coordShelterRaw = dati.posizione_rifugio || [];
+        const coordUser = Array.isArray(coordUserRaw) ? coordUserRaw.map(Number) : [Number(coordUserRaw[0]), Number(coordUserRaw[1])];
+        const coordShelter = Array.isArray(coordShelterRaw) ? coordShelterRaw.map(Number) : [Number(coordShelterRaw[0]), Number(coordShelterRaw[1])];
+
+        nomeEl.textContent = dati.nome;
+        indirizzoRifugioEl.textContent = dati.indirizzo;
+        distanzaEl.textContent = `Distanza: ${dati.distanza_km} km`;
+        animalImg.src = pickRandomMedia();
+
+        if (coordUser && coordShelter) {
+          const u = `${coordUser[0]},${coordUser[1]}`;
+          const s = `${coordShelter[0]},${coordShelter[1]}`;
+          // URL Corretto con backticks
+          directionsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(u)}&destination=${encodeURIComponent(s)}&travelmode=driving`;
+          directionsLink.classList.remove('hidden');
+        }
+
+        resultSection.classList.remove('hidden');
+        showFeedback('Risultato trovato.');
+        initMap(coordUser[0], coordUser[1], 12);
+        resetMap();
+        userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
+        shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
+
+        const group = L.featureGroup([userMarker, shelterMarker]);
+        map.fitBounds(group.getBounds().pad(0.4));
+        routingControl = L.Routing.control({
+          waypoints: [L.latLng(coordUser[0], coordUser[1]), L.latLng(coordShelter[0], coordShelter[1])],
+          lineOptions: { styles: [{ color: '#0066ff', opacity: 0.8, weight: 6 }] },
+          createMarker: function() { return null; },
+          addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: false, show: false
+        }).addTo(map);
+      } catch (err) {
+        console.error(err);
+        showFeedback('Errore di rete o del server.', true);
+      } finally {
+        setButtonLoading(false);
+      }
     });
-
-    const json = await resp.json();
-    if (!resp.ok || !json.successo) {
-      showFeedback(json.messaggio || 'Indirizzo non trovato.', true);
-      setButtonLoading(false);
-      return;
-    }
-
-    const dati = json.dati_rifugio;
-    const coordUserRaw = json.coordinate_utente || [];
-    const coordShelterRaw = dati.posizione_rifugio || [];
-
-    const coordUser = Array.isArray(coordUserRaw) ? coordUserRaw.map(Number) : [Number(coordUserRaw[0]), Number(coordUserRaw[1])];
-    const coordShelter = Array.isArray(coordShelterRaw) ? coordShelterRaw.map(Number) : [Number(coordShelterRaw[0]), Number(coordShelterRaw[1])];
-
-    nomeEl.textContent = dati.nome;
-    indirizzoRifugioEl.textContent = dati.indirizzo;
-    distanzaEl.textContent = `Distanza: ${dati.distanza_km} km`;
-    animalImg.src = pickRandomMedia();
-
-    if (coordUser && coordShelter) {
-      const u = `${coordUser[0]},${coordUser[1]}`;
-      const s = `${coordShelter[0]},${coordShelter[1]}`;
-      directionsLink.href = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(u)}&destination=${encodeURIComponent(s)}&travelmode=driving`;
-      directionsLink.classList.remove('hidden');
-    }
-
-    resultSection.classList.remove('hidden');
-    showFeedback('Risultato trovato.');
-
-    initMap(coordUser[0], coordUser[1], 12);
-    resetMap();
-    userMarker = L.marker([coordUser[0], coordUser[1]]).addTo(map).bindPopup('Tu').openPopup();
-    shelterMarker = L.marker([coordShelter[0], coordShelter[1]]).addTo(map).bindPopup(dati.nome);
-
-    const group = L.featureGroup([userMarker, shelterMarker]);
-    map.fitBounds(group.getBounds().pad(0.4));
-
-    routingControl = L.Routing.control({
-      waypoints: [L.latLng(coordUser[0], coordUser[1]), L.latLng(coordShelter[0], coordShelter[1])],
-      lineOptions: { styles: [{ color: '#0066ff', opacity: 0.8, weight: 6 }] },
-      createMarker: function() { return null; },
-      addWaypoints: false, draggableWaypoints: false, fitSelectedRoutes: false, show: false
-    }).addTo(map);
-
-  } catch (err) {
-    console.error(err);
-    showFeedback('Errore di rete o del server.', true);
-  } finally {
-    setButtonLoading(false);
-  }
-});
+}
 
 // ==========================================
-// 5. LOGICA AUTOCOMPLETE
+// 5. AUTOCOMPLETE
 // ==========================================
 let acContainer = null;
 let acItems = [];
 let acSelected = -1;
 let acAbortController = null;
-
 if (indirizzoInput) { indirizzoInput.setAttribute('autocomplete', 'off'); }
 
 function createAutocomplete() {
@@ -272,7 +287,7 @@ function createAutocomplete() {
 }
 
 function positionAutocomplete() {
-  if (!acContainer) return;
+  if (!acContainer || !indirizzoInput) return;
   const rect = indirizzoInput.getBoundingClientRect();
   const scrollY = window.scrollY || window.pageYOffset;
   const scrollX = window.scrollX || window.pageXOffset;
@@ -297,15 +312,12 @@ function renderAutocomplete(items) {
     const el = document.createElement('div');
     el.className = 'ac-item';
     Object.assign(el.style, { padding: '8px 10px', cursor: 'pointer', borderRadius: '6px', margin: '2px 0' });
-
     let displayText = typeof item === 'string' ? item : (item.display || item.name || '');
     let metaText = '';
-
     if (item && typeof item === 'object') {
         if (item.postcode) metaText = `CAP: ${item.postcode}`;
         else if (item.city && item.state) metaText = `${item.city}, ${item.state}`;
     }
-
     const title = document.createElement('div');
     title.textContent = displayText;
     title.style.fontWeight = '600'; title.style.fontSize = '0.95rem';
@@ -316,7 +328,6 @@ function renderAutocomplete(items) {
       sub.style.fontSize = '0.82rem'; sub.style.color = '#6b7280';
       el.appendChild(sub);
     }
-
     el.addEventListener('click', () => selectAutocomplete(idx));
     el.addEventListener('mouseenter', () => {
        if (acSelected >= 0 && acItems[acSelected]) acItems[acSelected].style.background = '';
@@ -327,7 +338,6 @@ function renderAutocomplete(items) {
     acContainer.appendChild(el);
     acItems.push(el);
   });
-
   if (items.length) { acContainer.style.display = 'block'; positionAutocomplete(); }
   else { clearAutocomplete(); }
 }
@@ -341,7 +351,6 @@ async function selectAutocomplete(i) {
   if (item.postcode && !val.includes(item.postcode)) {
     indirizzoInput.value += `, ${item.postcode}`;
   }
-
   clearAutocomplete();
   indirizzoInput.focus();
   let lat = item.lat != null ? Number(item.lat) : null;
@@ -360,7 +369,6 @@ async function selectAutocomplete(i) {
     } catch(e) { console.warn('Geocode failed', e); }
     finally { showFeedback(''); }
   }
-
   if (lat && lon) {
     initMap(lat, lon, 14);
     resetMap();
@@ -384,17 +392,19 @@ function debounce(fn, ms) {
   return function(...args) { clearTimeout(t); t = setTimeout(() => fn.apply(this, args), ms); };
 }
 
-indirizzoInput.addEventListener('input', debounce(async () => {
-  const v = indirizzoInput.value.trim();
-  if (!v) { clearAutocomplete(); return; }
-  const items = await fetchSuggestions(v);
-  renderAutocomplete(items.slice(0, 10));
-}, 250));
+if (indirizzoInput) {
+    indirizzoInput.addEventListener('input', debounce(async () => {
+      const v = indirizzoInput.value.trim();
+      if (!v) { clearAutocomplete(); return; }
+      const items = await fetchSuggestions(v);
+      renderAutocomplete(items.slice(0, 10));
+    }, 250));
+}
 window.addEventListener('resize', positionAutocomplete);
 createAutocomplete();
 
 // ==========================================
-// 6. LOGICA FOCOLAI
+// 6. FOCOLAI
 // ==========================================
 const TYPE_PALETTE = {
   'dog': ['#ef4444', '#991b1b'],
@@ -405,19 +415,8 @@ const TYPE_PALETTE = {
 };
 const visibleTypes = {};
 
-function getVal(props, keys) {
-    if (!props) return null;
-    const propKeys = Object.keys(props);
-    for (let key of keys) {
-        if (props[key] !== undefined) return props[key];
-        const found = propKeys.find(k => k.toLowerCase() === key.toLowerCase());
-        if (found) return props[found];
-    }
-    return null;
-}
-
 function getAnimalInfo(props) {
-    const rawType = getVal(props, ['Animal Typ', 'Animal Type', 'animal_type', 'Type', 'species']) || 'Other';
+    const rawType = getVal(props, TYPE_KEYS) || 'Other';
     const cleanType = String(rawType).toLowerCase();
     let key = 'other';
     if (cleanType.includes('dog') || cleanType.includes('cane')) key = 'dog';
@@ -450,7 +449,6 @@ function translateSpeciesKeyToItalian(key) {
     return m[key] || (typeof key === 'string' ? (key.charAt(0).toUpperCase() + key.slice(1)) : 'Altro');
 }
 
-// Inizializzazione Layers Focolai
 zoneLayer = L.geoJSON(null, {
   style: { color: '#dc2626', weight: 5, opacity: 0.7 },
   onEachFeature: (f, l) => l.bindPopup(`<b>ZONA PERICOLOSA:</b><br>${f.properties.name || 'Strada a rischio'}`)
@@ -479,16 +477,12 @@ function destroyFocolaiMap() {
 async function loadFocolai() {
   if (!mapFocolai) return;
   showFeedback('Carico analisi focolai...', false, true);
-
   try {
-    // 1. Zone Pericolose
     const resZone = await fetch('/api/geojson/zone_rosse');
     if (resZone.ok) {
         zoneLayer.clearLayers();
         zoneLayer.addData(await resZone.json());
     }
-
-    // 2. Animali Malati
     const resAnim = await fetch('/api/geojson/animali_malati');
     if (resAnim.ok) {
         const data = await resAnim.json();
@@ -505,79 +499,41 @@ async function loadFocolai() {
                 const p = feature.properties;
                 const info = getAnimalInfo(p);
                 layer._tipoKey = info.key;
-
-                const rawName = getVal(p, ['Animal Nam', 'Animal Name', 'AnimalName', 'name']) || "Senza nome";
+                const rawName = getVal(p, NAME_KEYS) || "Senza nome";
                 const nome = (rawName.toLowerCase() === 'unknown' || rawName.trim() === '') ? "Senza nome" : rawName;
-                const condizione = getVal(p, ['Intake Con', 'Intake Condition', 'Intake_Condition', 'condition']) || "Non specificato";
-                const colPrimario = getVal(p, ['Primary Co', 'Primary Color', 'PrimaryColor', 'Color']) || "N/A";
-                const colSecondario = getVal(p, ['Secondary Co', 'Secondary', 'Secondary C', 'Secondar_1', 'Secondary Color']) || "N/A";
-                const content = `
-                    <div style="font-family:sans-serif; font-size:14px; min-width:200px;">
-                        <div style="background:${info.palette[0]}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">
-                            ${String(info.label).toUpperCase()}
-                        </div>
-                        <div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;">
-                            <div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div>
-                            <div style="margin-bottom:6px;">
-                                <b>Salute:</b> <span style="color:#c53030; background:#fee2e2; padding:2px 5px; border-radius:4px; font-weight:bold;">${condizione}</span>
-                            </div>
-                            <div style="color:#666; margin-bottom:2px;"><b>Colore:</b> ${colPrimario} / ${colSecondario}</div>
-                        </div>
-                    </div>
-                `;
+                const condizione = getVal(p, ['Intake Con', 'condition']) || "Non specificato";
+                const colPrimario = getVal(p, ['Primary Co', 'Color']) || "N/A";
+                const content = `<div style="font-family:sans-serif; font-size:14px; min-width:200px;"><div style="background:${info.palette[0]}; color:white; padding:6px; border-radius:4px 4px 0 0; font-weight:bold;">${String(info.label).toUpperCase()}</div><div style="padding:10px; background:#fff; border:1px solid #ddd; border-top:none;"><div style="margin-bottom:6px;"><b>Nome:</b> ${nome}</div><div style="margin-bottom:6px;"><b>Salute:</b> <span style="color:#c53030; background:#fee2e2; padding:2px 5px; border-radius:4px; font-weight:bold;">${condizione}</span></div><div style="color:#666; margin-bottom:2px;"><b>Colore:</b> ${colPrimario}</div></div></div>`;
                 layer.bindPopup(content);
             }
         });
-
         animaliLayer.addTo(mapFocolai);
-
         const bounds = zoneLayer.getBounds();
         if(animaliLayer.getLayers().length > 0) bounds.extend(animaliLayer.getBounds());
         if (bounds.isValid()) mapFocolai.fitBounds(bounds.pad(0.1));
-
         buildLegend();
     }
-
-    // 3. Centri Focolai
     const resCentri = await fetch('/api/geojson/zone_rosse');
     if (resCentri.ok) {
         const dataCentri = await resCentri.json();
         if (centriFocolaiLayer) mapFocolai.removeLayer(centriFocolaiLayer);
         let unknownCounter = 1;
-
         centriFocolaiLayer = L.geoJSON(dataCentri, {
             pointToLayer: (feature, latlng) => {
-                return L.circleMarker(latlng, {
-                    radius: 15, fillColor: '#ff0000', color: '#000',
-                    weight: 2, opacity: 1, fillOpacity: 0.5
-                });
+                return L.circleMarker(latlng, { radius: 15, fillColor: '#ff0000', color: '#000', weight: 2, opacity: 1, fillOpacity: 0.5 });
             },
             onEachFeature: (feature, layer) => {
                 const props = feature.properties;
                 const lat = feature.geometry.coordinates[1].toFixed(5);
                 const lng = feature.geometry.coordinates[0].toFixed(5);
-                const rawId = getVal(props, ['CLUSTER_ID', 'cluster_id', 'id', 'ID']);
-                let displayTitle = (rawId !== null && rawId !== undefined && rawId !== "") ? `⚠️ FOCOLAIO ${rawId}` : `ZONA ROSSA #${unknownCounter++}`;
-
-                const popupContent = `
-                    <div style="text-align:center; min-width:150px;">
-                        <h3 style="margin:0; color:#dc2626; font-family:'Fredoka', sans-serif;">${displayTitle}</h3>
-                        <p style="font-size:0.9rem; margin:5px 0;">Alta concentrazione rilevata.</p>
-                        <div style="background:#f3f4f6; padding:5px; border-radius:4px; font-family:monospace; font-weight:bold;">
-                            LAT: ${lat}<br>LON: ${lng}
-                        </div>
-                        <button onclick="copiaCoordinate(${lat}, ${lng})" style="margin-top:5px; font-size:0.8rem; cursor:pointer;">
-                            Copia Coordinate
-                        </button>
-                    </div>
-                `;
-                layer.bindPopup(popupContent);
+                const rawId = getVal(props, ['CLUSTER_ID', 'id']);
+                let displayTitle = (rawId) ? `⚠️ FOCOLAIO ${rawId}` : `ZONA ROSSA #${unknownCounter++}`;
+                layer.bindPopup(`<div style="text-align:center; min-width:150px;"><h3 style="margin:0; color:#dc2626; font-family:'Fredoka', sans-serif;">${displayTitle}</h3><p style="font-size:0.9rem; margin:5px 0;">Alta concentrazione rilevata.</p><div style="background:#f3f4f6; padding:5px; border-radius:4px; font-family:monospace; font-weight:bold;">LAT: ${lat}<br>LON: ${lng}</div><button onclick="copiaCoordinate(${lat}, ${lng})" style="margin-top:5px; font-size:0.8rem; cursor:pointer;">Copia Coordinate</button></div>`);
             }
         });
         centriFocolaiLayer.addTo(mapFocolai);
         centriFocolaiLayer.bringToFront();
     }
-
     showFeedback('');
   } catch (e) {
     console.error(e);
@@ -614,25 +570,8 @@ function toggleType(key) {
             } catch (e) {}
         });
     }
-    // Toggle anche per i randagi
-    if (animatedLayerGroup) {
-        animatedLayerGroup.eachLayer(layer => {
-            try {
-                if (layer._tipoKey === key) {
-                    const visible = visibleTypes[key] !== false;
-                    if (layer.setStyle) layer.setStyle({ opacity: visible ? 0.9 : 0, fillOpacity: visible ? 0.9 : 0 });
-                    else if (layer.getElement) layer.getElement().style.display = visible ? '' : 'none';
-                    if (!visible) layer.closePopup && layer.closePopup();
-                }
-            }
-            catch (e) {}
-        });
-    }
-
     const rowA = document.getElementById(`leg-row-${key}`);
-    const rowB = document.getElementById(`randagi-leg-row-${key}`);
     if (rowA) rowA.style.opacity = visibleTypes[key] ? '1' : '0.4';
-    if (rowB) rowB.style.opacity = visibleTypes[key] ? '1' : '0.4';
 }
 
 function buildLegend() {
@@ -704,8 +643,6 @@ function createSwipePopupContent(p) {
 // *** MODIFICA: Due legende separate con TESTI AGGIORNATI E ZONA CONFLITTO RIMOSSA ***
 function buildSwipeLegend() {
     if (!legendSwipeEl) return;
-
-    // Colori Mappa
     const colOwner = "#ff7b7b"; // ROSSO (Punti Mappa)
     const colWild = "#7bdcff";  // BLU (Punti Mappa)
     const colConflict = "#8e44ad"; // VIOLA (Risultato Analisi)
@@ -810,7 +747,6 @@ async function loadSwipeMap() {
 
     // Listener per Radar di Conflitto
     mapSwipe.on('click', onSwipeMapClick);
-
     // Costruzione Legenda (Doppia: Punti + Analisi)
     buildSwipeLegend();
 
@@ -855,7 +791,6 @@ function deg2rad(deg) {
 // *** MODIFICA: Radar Logic (Owner Surrender vs Wildlife) ***
 function onSwipeMapClick(e) {
     if (!rawDomesticData || !rawWildData) return;
-
     const lat = e.latlng.lat;
     const lng = e.latlng.lng;
     const raggioKm = 1.5;
@@ -927,557 +862,487 @@ function initRandagiMap(lat = 34.0219, lng = -118.4814, zoom = 11) {
     if (!document.getElementById('map-randagi')) return;
     if (mapRandagi) { setTimeout(() => mapRandagi.invalidateSize(), 200); return; }
     mapRandagi = L.map('map-randagi', { preferCanvas: true }).setView([lat, lng], zoom);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapRandagi);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapRandagi);
+    randagiLayerGroup = L.layerGroup().addTo(mapRandagi);
 }
 
 function destroyRandagiMap() {
+    stopAnimation();
     try {
-        if (randagiGlobalTimer) { clearInterval(randagiGlobalTimer); randagiGlobalTimer = null; }
-        const controls = document.getElementById('randagi-anim-controls');
-        if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
-        const label = document.getElementById('randagi-anim-label');
-        if (label && label.parentNode) label.parentNode.removeChild(label);
-        const table = document.getElementById('randagi-table-container');
-        if (table && table.parentNode) table.parentNode.removeChild(table);
-        const leg = document.getElementById('randagi-legend');
-        if (leg) leg.remove();
-
-        if (animatedLayerGroup) { try { animatedLayerGroup.clearLayers(); } catch (e) {} animatedLayerGroup = null; }
+        const controls = document.getElementById('randagi-controls-ui');
+        if (controls) controls.remove();
+        if (randagiLayerGroup) { randagiLayerGroup.clearLayers(); randagiLayerGroup = null; }
         if (mapRandagi) { mapRandagi.remove(); mapRandagi = null; }
-        if (randagiContainer) { randagiContainer.classList.add('hidden'); }
-    } catch (e) { console.warn('destroyRandagiMap error', e); }
+        randagiDataFeatures = [];
+        monthBuckets = {};
+        sortedMonthKeys = [];
+        if (randagiContainer) randagiContainer.classList.add('hidden');
+    } catch (e) { console.warn(e); }
 }
 
 async function loadRandagiData() {
-    showRandagiFeedback('Caricamento dati randagi...', false);
+    showRandagiFeedback('Caricamento dati...', false);
     try {
         const res = await fetch(`/api/geojson/animali_randagi?_=${Date.now()}`);
-        if (!res.ok) { throw new Error('Impossibile caricare animali randagi'); }
+        if (!res.ok) throw new Error('Errore fetch');
         const data = await res.json();
-        if (data && data.type === 'FeatureCollection' && Array.isArray(data.features) && data.features.length === 0) {
-            showRandagiFeedback('Nessun dato per animali randagi trovato (file mancante o vuoto).', true);
+        if (!data || !data.features || data.features.length === 0) {
+            showRandagiFeedback('Nessun dato trovato.', true);
             return;
         }
+        randagiDataFeatures = data.features;
+        initRandagiMap();
 
-        buildRandagiTable(data.features || []);
-        const countsSesso = { 'Male': 0, 'Female': 0, 'Unknown': 0 };
-        const countsTipo = {};
-        const monthBuckets = {};
-        (data.features || []).forEach(f => {
+        monthBuckets = {};
+        randagiDataFeatures.forEach(f => {
             const p = f.properties || {};
-            let s = (p.sex || p.Sex || p.SESSO || p.gender || p.Gender || '').toString().trim().toLowerCase();
-            if (!s || s === 'unknown' || s === 'na') s = 'Unknown';
-            else if (s.startsWith('m')) s = 'Male';
-            else if (s.startsWith('f')) s = 'Female';
-            else s = 'Unknown';
-            countsSesso[s] = (countsSesso[s] || 0) + 1;
-
-            let t = (p.species || p.type || p.animal_type || '').toString().trim().toLowerCase();
-            if (!t) t = (p['Animal Typ'] || '').toString().trim().toLowerCase();
-            if (!t) t = 'other';
-            if (t.includes('dog') || t.includes('cane')) t = 'dog';
-            else if (t.includes('cat') || t.includes('gatto')) t = 'cat';
-            else if (t.includes('bird') || t.includes('uccello')) t = 'bird';
-            else if (t.includes('rabbit') || t.includes('coniglio')) t = 'rabbit';
-            else t = 'other';
-            countsTipo[t] = (countsTipo[t] || 0) + 1;
-
-            let rawDate = getVal(p, ['Intake Dat', 'intake_date', 'date_found', 'found_date', 'Date', 'datetime']) || '';
+            let rawDate = getVal(p, DATE_KEYS);
             let monthKey = 'Unknown';
             if (rawDate) {
-                try {
-                    const d = new Date(String(rawDate));
-                    if (!isNaN(d.getTime())) {
-                        const y = d.getUTCFullYear();
-                        const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-                        monthKey = `${y}-${m}`;
-                    } else {
-                        const m = String(rawDate).match(/(\d{4}-\d{2})/);
-                        if (m && m[1]) monthKey = m[1];
-                    }
-                } catch (err) { monthKey = 'Unknown'; }
+                const d = new Date(rawDate);
+                if (!isNaN(d.getTime())) {
+                    const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+                    const y = d.getUTCFullYear();
+                    monthKey = `${y}-${m}`;
+                }
             }
             if (!monthBuckets[monthKey]) monthBuckets[monthKey] = [];
+            f._monthKey = monthKey;
+
+            const name = getVal(p, NAME_KEYS) || 'unknown';
+            const species = getVal(p, TYPE_KEYS) || 'unknown';
+            const dateStr = rawDate ? new Date(rawDate).toISOString().split('T')[0] : 'nodate';
+            const shelterName = getVal(p, SHELTER_KEYS) || 'unknown';
+            const compositeId = `${name}-${species}-${dateStr}-${shelterName}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+            f._safeId = compositeId;
             monthBuckets[monthKey].push(f);
         });
 
-        buildRandagiCharts(countsSesso);
-        initRandagiMap();
-        if (randagiLayer && mapRandagi) { mapRandagi.removeLayer(randagiLayer); randagiLayer = null; }
-        buildRandagiLegend(countsTipo);
-        window.randagiBuckets = monthBuckets;
-        animateRandagiByMonth(monthBuckets);
+        sortedMonthKeys = Object.keys(monthBuckets).filter(k => k !== 'Unknown').sort();
+        if (monthBuckets['Unknown']) sortedMonthKeys.push('Unknown');
+        currentMonthIndex = sortedMonthKeys.length > 0 ? 0 : 0;
+
+        setupRandagiControls();
+        renderMonthState();
         showRandagiFeedback('');
     } catch (e) {
         console.error(e);
-        showRandagiFeedback('Errore nel caricamento dei dati randagi.', true);
+        showRandagiFeedback('Errore caricamento.', true);
     }
+}
+
+function setupRandagiControls() {
+    const old = document.getElementById('randagi-controls-ui');
+    if (old) old.remove();
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'randagi-controls-ui';
+    wrapper.className = 'randagi-controls-wrapper';
+
+    const navGroup = document.createElement('div');
+    navGroup.className = 'nav-group';
+
+    const btnPlay = document.createElement('button');
+    btnPlay.className = 'btn-nav btn-play';
+    btnPlay.id = 'randagi-btn-play';
+    btnPlay.innerHTML = '▶ Animazione Totale';
+    btnPlay.onclick = toggleAnimation;
+
+    const btnPrev = document.createElement('button');
+    btnPrev.className = 'btn-nav';
+    btnPrev.innerHTML = '❮';
+    btnPrev.onclick = () => { stopAnimation(); changeMonth(-1); };
+
+    const display = document.createElement('div');
+    display.id = 'randagi-month-display';
+    display.className = 'month-display';
+    display.textContent = 'Caricamento...';
+
+    const btnNext = document.createElement('button');
+    btnNext.className = 'btn-nav';
+    btnNext.innerHTML = '❯';
+    btnNext.onclick = () => { stopAnimation(); changeMonth(1); };
+
+    navGroup.appendChild(btnPlay);
+    navGroup.appendChild(btnPrev);
+    navGroup.appendChild(display);
+    navGroup.appendChild(btnNext);
+
+    const legendDiv = document.createElement('div');
+    legendDiv.id = 'randagi-dynamic-legend';
+    legendDiv.className = 'randagi-legend-inline';
+
+    wrapper.appendChild(navGroup);
+    wrapper.appendChild(legendDiv);
+
+    const mapEl = document.getElementById('map-randagi');
+    mapEl.parentNode.insertBefore(wrapper, mapEl);
+}
+
+function changeMonth(delta) {
+    if (sortedMonthKeys.length === 0) return;
+    let newIndex = currentMonthIndex + delta;
+    if (newIndex < 0) newIndex = 0;
+    if (newIndex >= sortedMonthKeys.length) newIndex = sortedMonthKeys.length - 1;
+    if (newIndex !== currentMonthIndex) {
+        currentMonthIndex = newIndex;
+        renderMonthState();
+    }
+}
+
+function getUniqueFeatures(features) {
+    const seenIds = new Set();
+    const unique = [];
+    features.forEach(f => {
+        if (!f._safeId) return;
+        if (seenIds.has(f._safeId)) return;
+        seenIds.add(f._safeId);
+        unique.push(f);
+    });
+    return unique;
+}
+
+function renderMonthState() {
+    if (sortedMonthKeys.length === 0) return;
+    const key = sortedMonthKeys[currentMonthIndex];
+    const display = document.getElementById('randagi-month-display');
+    if (display) {
+        if (key === 'Unknown') display.textContent = 'Data Sconosciuta';
+        else {
+            const [y, m] = key.split('-');
+            const d = new Date(Number(y), Number(m)-1, 1);
+            const label = d.toLocaleString('it-IT', { month: 'long', year: 'numeric' });
+            display.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+        }
+    }
+    if (!isAnimating) {
+        randagiLayerGroup.clearLayers();
+        const features = monthBuckets[key] || [];
+        const uniqueFeatures = getUniqueFeatures(features);
+        addFeaturesToMap(uniqueFeatures);
+        buildRandagiTable(uniqueFeatures);
+        updateChartFromFeatures(uniqueFeatures);
+    }
+}
+
+function addFeaturesToMap(features, updateLegend = true) {
+    const counts = {};
+    features.forEach(f => {
+        const coords = extractCoords(f.geometry);
+        if (!coords) return;
+        const info = getAnimalInfo(f.properties);
+
+        if (updateLegend) {
+            counts[info.key] = (counts[info.key] || 0) + 1;
+        }
+
+        const marker = L.circleMarker(coords, {
+            radius: 7, fillColor: info.palette[0], color: '#fff',
+            weight: 1.5, opacity: 1, fillOpacity: 0.9
+        });
+        const p = f.properties;
+        const nome = getVal(p, NAME_KEYS) || 'Senza nome';
+        const shelter = getVal(p, SHELTER_KEYS) || 'Rifugio sconosciuto';
+        marker.bindPopup(`<b>${nome}</b><br>${translateSpeciesKeyToItalian(info.key)}<br>${shelter}`);
+        marker.on('click', () => highlightTableAnimal(f._safeId));
+        marker.addTo(randagiLayerGroup);
+    });
+    if (updateLegend) {
+        updateDynamicLegend(counts);
+    }
+}
+
+function toggleAnimation() {
+    if (isAnimating) stopAnimation();
+    else startAnimation();
+}
+
+function startAnimation() {
+    if (sortedMonthKeys.length === 0) return;
+    isAnimating = true;
+    const btn = document.getElementById('randagi-btn-play');
+    if (btn) { btn.innerHTML = '⏹ Stop'; btn.classList.add('active'); }
+    randagiLayerGroup.clearLayers();
+    currentMonthIndex = 0;
+    const accumulatedFeatures = [];
+    const seenIds = new Set();
+    const animationCounts = { 'dog': 0, 'cat': 0, 'bird': 0, 'rabbit': 0, 'other': 0 };
+    const step = () => {
+        if (currentMonthIndex >= sortedMonthKeys.length) { stopAnimation(false); return; }
+        const key = sortedMonthKeys[currentMonthIndex];
+        const rawFeats = monthBuckets[key] || [];
+        const newUniqueFeats = [];
+        rawFeats.forEach(f => {
+            if(!seenIds.has(f._safeId)) {
+                seenIds.add(f._safeId);
+                newUniqueFeats.push(f);
+                accumulatedFeatures.push(f);
+                const info = getAnimalInfo(f.properties);
+                animationCounts[info.key] = (animationCounts[info.key] || 0) + 1;
+            }
+        });
+        addFeaturesToMap(newUniqueFeats, false);
+        updateDynamicLegend(animationCounts);
+        renderMonthState();
+        buildRandagiTable(accumulatedFeatures);
+        updateChartFromFeatures(accumulatedFeatures);
+        currentMonthIndex++;
+    };
+    step();
+    animationTimer = setInterval(step, 800);
+}
+
+function stopAnimation(resetToSingle = true) {
+    isAnimating = false;
+    if (animationTimer) { clearInterval(animationTimer); animationTimer = null; }
+    const btn = document.getElementById('randagi-btn-play');
+    if (btn) { btn.innerHTML = '▶ Animazione Totale'; btn.classList.remove('active'); }
+    if (resetToSingle && sortedMonthKeys.length > 0) {
+        if (currentMonthIndex >= sortedMonthKeys.length) currentMonthIndex = sortedMonthKeys.length - 1;
+        renderMonthState();
+    }
+}
+
+function updateChartFromFeatures(features) {
+    const counts = { 'Male': 0, 'Female': 0, 'Unknown': 0 };
+    features.forEach(f => {
+        const p = f.properties || {};
+        let s = getVal(p, SEX_KEYS) || '';
+        s = s.toString().trim().toLowerCase();
+        if (s.startsWith('m')) counts['Male']++;
+        else if (s.startsWith('f')) counts['Female']++;
+        else counts['Unknown']++;
+    });
+    setTimeout(() => buildRandagiCharts(counts), 50);
 }
 
 function buildRandagiCharts(countsSesso) {
-     const pieCtx = document.getElementById('randagi-pie').getContext('2d');
-     const rawLabels = Object.keys(countsSesso);
-     const labelMap = { 'Male': 'Maschio', 'Female': 'Femmina', 'Unknown': 'Sconosciuto' };
-     const pieLabels = rawLabels.map(l => labelMap[l] || l);
-     const pieData = rawLabels.map(l => countsSesso[l]);
-     const pieColors = rawLabels.map(l => l === 'Male' ? '#3b82f6' : (l === 'Female' ? '#ef4444' : '#9ca3af'));
-     if (pieChart) pieChart.destroy();
-     pieChart = new Chart(pieCtx, {
-         type: 'pie',
-         data: { labels: pieLabels, datasets: [{ data: pieData, backgroundColor: pieColors }] },
-         options: {
-             plugins: { legend: { position: 'bottom' } },
-             responsive: true, maintainAspectRatio: false
-         }
-     });
-}
-
-function buildRandagiLegend(countsTipo) {
-    if (!randagiContainer) return;
-    let legend = document.getElementById('randagi-legend');
-    if (!legend) {
-        legend = document.createElement('div');
-        legend.id = 'randagi-legend';
-        Object.assign(legend.style, { marginTop: '8px', padding: '8px', background: '#fff', borderRadius: '8px', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' });
-        randagiContainer.appendChild(legend);
+    const ctx = document.getElementById('randagi-pie');
+    if (!ctx) return;
+    if (pieChart) {
+        pieChart.data.datasets[0].data = [countsSesso['Male'], countsSesso['Female'], countsSesso['Unknown']];
+        pieChart.update();
+        return;
     }
-    legend.innerHTML = '<strong>Legenda specie</strong>';
-    const pal = { 'dog': '#ef4444', 'cat': '#3b82f6', 'bird': '#eab308', 'rabbit': '#a855f7', 'other': '#6b7280' };
-    const nameMap = { 'dog': 'Cane', 'cat': 'Gatto', 'bird': 'Uccello', 'rabbit': 'Coniglio', 'other': 'Altro' };
-    Object.keys(countsTipo).forEach(key => {
-        if (!visibleTypes[key]) visibleTypes[key] = true;
-        const row = document.createElement('div');
-        Object.assign(row.style, { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px', cursor: 'pointer' });
-        const dot = document.createElement('span');
-        Object.assign(dot.style, { width: '14px', height: '14px', background: pal[key] || '#9ca3af', borderRadius: '50%', display: 'inline-block' });
-        const txt = document.createElement('span');
-        txt.textContent = `${nameMap[key] || key} (${countsTipo[key]})`;
-        row.appendChild(dot);
-        row.appendChild(txt);
-        row.onclick = () => toggleType(key);
-        row.id = `randagi-leg-row-${key}`;
-        legend.appendChild(row);
+    const labels = ['Maschio', 'Femmina', 'Sconosciuto'];
+    const data = [countsSesso['Male'], countsSesso['Female'], countsSesso['Unknown']];
+    pieChart = new Chart(ctx.getContext('2d'), {
+        type: 'pie',
+        data: { labels: labels, datasets: [{ data: data, backgroundColor: ['#3b82f6', '#ef4444', '#9ca3af'] }] },
+        options: {
+            plugins: { legend: { position: 'bottom' } },
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 }
+        }
     });
 }
 
 function buildRandagiTable(features) {
     if (!randagiContainer) return;
-    let existing = document.getElementById('randagi-table-container');
-    if (existing) existing.remove();
+    const oldContainer = document.getElementById('randagi-table-container');
+    if (oldContainer) oldContainer.remove();
 
     const container = document.createElement('div');
     container.id = 'randagi-table-container';
-    Object.assign(container.style, { marginTop: '12px', background: '#fff', padding: '8px', borderRadius: '8px', maxHeight: '260px', overflow: 'auto', boxShadow: '0 6px 18px rgba(2,6,23,0.04)' });
-
+    Object.assign(container.style, { background: '#fff', borderRadius: '8px', maxHeight: '300px', overflow: 'auto', border: '1px solid #e5e7eb', marginTop: '10px' });
     const table = document.createElement('table');
     table.style.width = '100%';
     table.style.borderCollapse = 'collapse';
-
-    table.innerHTML = `<thead>
-        <tr>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Nome</th>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Specie</th>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Data</th>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Rifugio</th>
-            <th style="text-align:left; padding:6px; border-bottom:1px solid #eee">Coordinate</th>
-        </tr>
-    </thead>`;
-
+    table.innerHTML = `<thead style="position:sticky; top:0; background:#f9fafb; z-index:10; box-shadow:0 1px 2px rgba(0,0,0,0.05);"><tr><th style="padding:10px; text-align:left; border-bottom:1px solid #ddd;">Nome</th><th style="padding:10px; text-align:left; border-bottom:1px solid #ddd;">Specie</th><th style="padding:10px; text-align:left; border-bottom:1px solid #ddd;">Data</th><th style="padding:10px; text-align:left; border-bottom:1px solid #ddd;">Rifugio</th></tr></thead>`;
     const tbody = document.createElement('tbody');
-    const seen = new Set();
 
-    (features || []).forEach(f => {
-        try {
-            const p = f.properties || {};
-            const geom = f.geometry || {};
-            let id = getVal(p, ['id','ID','Id','objectid']);
-            let name = getVal(p, ['Animal Nam', 'Animal Name', 'name']) || '';
-            let date = getVal(p, ['Intake Dat','intake_date','date_found']) || '';
-            const coords = extractCoords(geom) || [];
-            const coordStr = coords.length >= 2 ? `${coords[0].toFixed(5)}, ${coords[1].toFixed(5)}` : '';
-            const key = id ? String(id) : `${String(name).trim().toLowerCase()}|${String(date).trim()}|${coordStr}`;
+    features.forEach(f => {
+        const p = f.properties || {};
+        const tr = document.createElement('tr');
+        tr.id = `row-${f._safeId}`;
+        tr.style.cursor = 'pointer';
+        tr.style.borderBottom = '1px solid #f3f3f3';
 
-            if (seen.has(key)) return;
-            seen.add(key);
+        const nome = getVal(p, NAME_KEYS) || 'Senza nome';
+        const specie = translateSpeciesKeyToItalian(getAnimalInfo(p).key);
+        const data = getVal(p, DATE_KEYS) || '-';
+        const rifugio = getVal(p, SHELTER_KEYS) || 'Rifugio non spec.';
 
-            let specie = getVal(p, ['species','type','animal_type','Animal Type', 'Animal Typ']) || '';
-            specie = translateSpeciesKeyToItalian(specie.toLowerCase());
-
-            let shelter = getVal(p, ['Shelter_Na', 'Shelter_Name', 'Shelter Name', 'shelter_name']) || 'N/A';
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${name || 'Senza nome'}</td>
-                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${specie}</td>
-                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${date || '-'}</td>
-                <td style="padding:6px; border-bottom:1px solid #f3f3f3; color:#0066ff; font-weight:500;">${shelter}</td>
-                <td style="padding:6px; border-bottom:1px solid #f3f3f3">${coordStr || '-'}</td>
-            `;
-            tbody.appendChild(tr);
-        } catch (e) { }
+        tr.innerHTML = `<td style="padding:10px; font-weight:600;">${nome}</td><td style="padding:10px;">${specie}</td><td style="padding:10px; color:#666; font-size:0.9rem;">${data}</td><td style="padding:10px; color:#0066ff;">${rifugio}</td>`;
+        tr.onclick = () => highlightTableAnimal(f._safeId, false);
+        tbody.appendChild(tr);
     });
     table.appendChild(tbody);
     container.appendChild(table);
-
-    const resetBtn = document.createElement('button');
-    resetBtn.textContent = 'Reset caricamento';
-    Object.assign(resetBtn.style, { marginTop: '8px', padding: '8px 10px', borderRadius: '8px', cursor: 'pointer', border: 'none', background: '#ef4444', color: '#fff' });
-    resetBtn.onclick = () => { resetRandagiLoading(); };
-    container.appendChild(resetBtn);
     randagiContainer.appendChild(container);
 }
 
-function resetRandagiLoading() {
-    try {
-        const play = document.getElementById('randagi-play');
-        const pause = document.getElementById('randagi-pause');
-        if (play) play.disabled = false;
-        if (pause) pause.disabled = true;
-
-        if (animatedLayerGroup) {
-            try { animatedLayerGroup.clearLayers(); } catch (e) {}
-            if (mapRandagi && mapRandagi.hasLayer(animatedLayerGroup)) mapRandagi.removeLayer(animatedLayerGroup);
-            animatedLayerGroup = null;
-        }
-
-        const controls = document.getElementById('randagi-anim-controls');
-        if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
-        const label = document.getElementById('randagi-anim-label');
-        if (label && label.parentNode) label.parentNode.removeChild(label);
-
-        if (window.randagiBuckets) {
-            showRandagiFeedback('Animazione resettata. Premi Play per iniziare.');
-            animateRandagiByMonth(window.randagiBuckets, { speedPct: 50, autoStart: false });
-        } else {
-            showRandagiFeedback('Caricamento resettato.');
-        }
-    } catch (e) { console.warn('resetRandagiLoading error', e); }
-}
-
-function animateRandagiByMonth(monthBuckets, opts = {}) {
-    if (!mapRandagi) return;
-    if (animatedLayerGroup) {
-        try { animatedLayerGroup.eachLayer(l => { if (l.remove) l.remove(); }); } catch(e){}
-        if (mapRandagi.hasLayer(animatedLayerGroup)) mapRandagi.removeLayer(animatedLayerGroup);
-    }
-    animatedLayerGroup = L.layerGroup().addTo(mapRandagi);
-    const rawKeys = Object.keys(monthBuckets || {});
-    const knownKeys = rawKeys.filter(k => k !== 'Unknown' && /^\d{4}-\d{2}$/.test(k)).sort();
-    const otherKeys = rawKeys.filter(k => !/^\d{4}-\d{2}$/.test(k) && k !== 'Unknown');
-    const months = knownKeys.concat(otherKeys);
-    if (rawKeys.includes('Unknown')) months.push('Unknown');
-    let labelEl = document.getElementById('randagi-anim-label');
-    if (!labelEl) {
-        labelEl = document.createElement('div');
-        labelEl.id = 'randagi-anim-label';
-        Object.assign(labelEl.style, { position: 'absolute', top: '10px', right: '10px', padding: '6px 10px', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: '6px', zIndex: 1000, fontWeight: '600' });
-        mapRandagi.getContainer().appendChild(labelEl);
-    }
-
-    let controlsEl = document.getElementById('randagi-anim-controls');
-    if (!controlsEl) {
-        controlsEl = document.createElement('div');
-        controlsEl.id = 'randagi-anim-controls';
-        Object.assign(controlsEl.style, { position: 'absolute', top: '50px', right: '10px', padding: '8px', background: 'rgba(255,255,255,0.95)', borderRadius: '10px', zIndex: 1000, display: 'flex', gap: '8px', alignItems: 'center', boxShadow: '0 6px 20px rgba(15,23,42,0.12)', flexDirection: 'column', minWidth: '180px' });
-        const rowTop = document.createElement('div');
-        Object.assign(rowTop.style, { display: 'flex', gap: '8px', width: '100%', justifyContent: 'space-between' });
-        const btnPlay = document.createElement('button');
-        btnPlay.id = 'randagi-play'; btnPlay.innerHTML = '▶️ <span style="font-weight:600;">Play</span>';
-        const btnPause = document.createElement('button'); btnPause.id = 'randagi-pause'; btnPause.innerHTML = '⏸️ <span style="font-weight:600;">Pausa</span>';
-        [btnPlay, btnPause].forEach(b => {
-            b.style.padding = '8px 10px'; b.style.border = 'none'; b.style.background = 'linear-gradient(180deg,#ffffff,#f3f4f6)'; b.style.borderRadius = '8px'; b.style.cursor = 'pointer'; b.style.boxShadow = '0 4px 10px rgba(2,6,23,0.08)'; b.style.fontSize = '0.95rem';
-        });
-        btnPlay.style.color = '#065f46'; btnPause.style.color = '#7f1d1d'; btnPause.disabled = true;
-        rowTop.appendChild(btnPlay); rowTop.appendChild(btnPause);
-
-        const sliderRow = document.createElement('div');
-        Object.assign(sliderRow.style, { display: 'flex', alignItems: 'center', gap: '8px', width: '100%' });
-        const speedLabel = document.createElement('div'); speedLabel.id = 'randagi-speed-label';
-        speedLabel.style.fontSize = '0.85rem'; speedLabel.style.minWidth = '90px';
-        const speed = document.createElement('input'); speed.type = 'range'; speed.min = '1'; speed.max = '100';
-        speed.step = '1'; speed.value = String(opts.speedPct || 50);
-        speed.style.flex = '1';
-        sliderRow.appendChild(speedLabel); sliderRow.appendChild(speed);
-        const resetBtnSmall = document.createElement('button'); resetBtnSmall.textContent = 'Reset';
-        Object.assign(resetBtnSmall.style, { padding: '6px 8px', borderRadius: '8px', border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', width: '100%' });
-        controlsEl.appendChild(rowTop); controlsEl.appendChild(sliderRow);
-        controlsEl.appendChild(resetBtnSmall);
-        mapRandagi.getContainer().appendChild(controlsEl);
-
-        const minMs = 80; const maxMs = 2400;
-        function pctToMs(pct) { return Math.round(maxMs - (Math.max(0, Math.min(100, Number(pct))) / 100) * (maxMs - minMs)); }
-        function updateSpeedLabel() { speedLabel.textContent = `Velocità: ${speed.value}%`; }
-        updateSpeedLabel();
-
-        let idx = 0; let isRunning = false;
-        let intervalMsLocal = pctToMs(Number(speed.value));
-
-        function stepOnce() {
-            if (idx >= months.length) { stopTimer(); labelEl.textContent = 'Fine (Reset per rivedere)'; return; }
-            const monthKey = months[idx++];
-            labelEl.textContent = `Mese: ${formatMonthLabel(monthKey)}`;
-            const feats = monthBuckets[monthKey] || [];
-            feats.forEach(f => {
-                try {
-                    const geom = f.geometry; if (!geom) return;
-                    const latlon = extractCoords(geom); if (!latlon) return;
-                    const info = getAnimalInfo(f.properties || {});
-                    const marker = L.circleMarker(latlon, {
-                        radius: 8, fillColor: (info.palette ? info.palette[0] : '#6b7280'),
-                        color: '#222', weight: 1.25, opacity: 1, fillOpacity: 1
-                    });
-                    marker._tipoKey = info.key || 'other';
-                    const p = f.properties || {};
-                    const nome = getVal(p, ['Animal Nam', 'name']) || 'Senza nome';
-                    marker.bindPopup(`<b>${translateSpeciesKeyToItalian(info.key)}</b><br>Nome: ${nome}`);
-                    marker.addTo(animatedLayerGroup);
-                } catch (e) { }
-            });
-        }
-        function startTimer() {
-            if (isRunning) return;
-            isRunning = true;
-            btnPlay.disabled = true; btnPause.disabled = false;
-            if (idx >= months.length) { idx = 0; animatedLayerGroup.clearLayers(); }
-            stepOnce(); randagiGlobalTimer = setInterval(() => stepOnce(), intervalMsLocal);
-        }
-        function stopTimer() {
-            isRunning = false;
-            if (randagiGlobalTimer) { clearInterval(randagiGlobalTimer); randagiGlobalTimer = null; }
-            btnPlay.disabled = false;
-            btnPause.disabled = true;
-        }
-        btnPlay.onclick = () => startTimer();
-        btnPause.onclick = () => stopTimer();
-        speed.oninput = (e) => { updateSpeedLabel(); intervalMsLocal = pctToMs(Number(e.target.value)); if (isRunning) { stopTimer(); startTimer(); } };
-        resetBtnSmall.onclick = () => { resetRandagiLoading(); };
-        if (opts.autoStart !== false) startTimer();
-        else labelEl.textContent = 'Pronto - Premi Play';
-    }
-    function formatMonthLabel(k) {
-        if (k === 'Unknown') return 'Sconosciuto';
-        const [y, m] = k.split('-');
-        return new Date(Number(y), Number(m) - 1, 1).toLocaleString('it-IT', { month: 'short', year: 'numeric' });
+function highlightTableAnimal(safeId, scroll = true) {
+    document.querySelectorAll('#randagi-table-container tr.highlight-row').forEach(r => { r.classList.remove('highlight-row'); });
+    const row = document.getElementById(`row-${safeId}`);
+    if (row) {
+        row.classList.add('highlight-row');
+        if (scroll) { row.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
     }
 }
 
-// ==========================================
-// 9. SEZIONE ANIMALI DIFFICILI (CORRETTO & ROBUSTO)
-// ==========================================
+function updateDynamicLegend(counts) {
+    const container = document.getElementById('randagi-dynamic-legend');
+    if (!container) return;
+    container.innerHTML = '';
+    const pal = { 'dog': '#ef4444', 'cat': '#3b82f6', 'bird': '#eab308', 'rabbit': '#a855f7', 'other': '#6b7280' };
+    Object.keys(counts).forEach(k => {
+        const item = document.createElement('div');
+        Object.assign(item.style, { display:'flex', alignItems:'center', gap:'5px', fontSize:'0.85rem', marginRight:'10px' });
+        item.innerHTML = `<span style="width:10px; height:10px; background:${pal[k]||'#999'}; border-radius:50%;"></span> ${translateSpeciesKeyToItalian(k)} (${counts[k]})`;
+        container.appendChild(item);
+    });
+}
 
+// ==========================================
+// 9. ANIMALI DIFFICILI (UPDATE LEGENDA INTERNA)
+// ==========================================
 function getIntakeValue(props) {
     if (!props) return 0;
-    const val = props['intake_dur_mean'] ||
-                props['intake_duration_mean'] ||
-                props['intake_dur'] ||
-                props['intake_mea'] ||
-                props['intake_d_1'] ||
-                props['Mean'] ||
-                0;
+    const val = props['intake_dur_mean'] || props['intake_duration_mean'] || props['intake_dur'] || 0;
     return Number(val);
 }
 
 function getDifficiliColor(d) {
-    return d > 90 ? '#800026' :
-           d > 60 ? '#BD0026' :
-           d > 45 ? '#E31A1C' :
-           d > 30 ? '#FC4E2A' :
-           d > 15 ? '#FD8D3C' :
-           d > 0  ? '#FEB24C' :
-                    '#FFEDA0';
+    return d > 90 ? '#800026' : d > 60 ? '#BD0026' : d > 45 ? '#E31A1C' : d > 30 ? '#FC4E2A' : d > 15 ? '#FD8D3C' : d > 0  ? '#FEB24C' : '#FFEDA0';
 }
 
 function styleDifficili(feature) {
     const val = getIntakeValue(feature.properties);
-    return {
-        fillColor: getDifficiliColor(val),
-        weight: 1,
-        opacity: 1,
-        color: 'white',
-        dashArray: '3',
-        fillOpacity: 0.7
-    };
-}
-
-function highlightDifficili(e) {
-    const layer = e.target;
-    layer.setStyle({ weight: 3, color: '#666', dashArray: '', fillOpacity: 0.9 });
-    layer.bringToFront();
-}
-
-function resetHighlightDifficili(e) {
-    difficiliLayer.resetStyle(e.target);
+    return { fillColor: getDifficiliColor(val), weight: 1, opacity: 1, color: 'white', dashArray: '3', fillOpacity: 0.7 };
 }
 
 function onEachFeatureDifficili(feature, layer) {
     layer.on({
-        mouseover: highlightDifficili,
-        mouseout: resetHighlightDifficili,
-        click: (e) => layer.openPopup()
+        mouseover: (e) => { const l = e.target; l.setStyle({ weight: 3, color: '#666', dashArray: '', fillOpacity: 0.9 }); l.bringToFront(); },
+        mouseout: (e) => { difficiliLayer.resetStyle(e.target); },
+        click: () => layer.openPopup()
     });
     const rawVal = getIntakeValue(feature.properties);
     const giorni = Math.round(rawVal);
-    const nome = feature.properties.city || feature.properties.Name || feature.properties.name || feature.properties.NAME || "Zona";
-
-    const popupContent = `
-        <div style="font-family:'Fredoka', sans-serif; text-align:center;">
-            <h4 style="margin:0 0 5px 0; color:#c2410c;">${nome}</h4>
-            <div style="font-size:0.9rem;">Permanenza Media:</div>
-            <div style="font-size:1.5rem; font-weight:bold; color:#BD0026;">${giorni} giorni</div>
-            <div style="font-size:0.8rem; color:#666; margin-top:5px;">Tempo prima dell'adozione</div>
-        </div>
-    `;
-    layer.bindPopup(popupContent);
+    const nome = feature.properties.city || feature.properties.Name || "Zona";
+    layer.bindPopup(`<div style="font-family:'Fredoka', sans-serif; text-align:center;"><h4 style="margin:0 0 5px 0; color:#c2410c;">${nome}</h4><div style="font-size:0.9rem;">Permanenza Media:</div><div style="font-size:1.5rem; font-weight:bold; color:#BD0026;">${giorni} giorni</div></div>`);
 }
 
 function initDifficiliMap() {
     if (mapDifficili) { setTimeout(() => mapDifficili.invalidateSize(), 100); return; }
     mapDifficili = L.map('map-difficili').setView([34.0522, -118.2437], 10);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap, © CartoDB',
-        maxZoom: 19
-    }).addTo(mapDifficili);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(mapDifficili);
 }
 
 async function loadDifficiliData() {
     if (!mapDifficili) return;
-    legendDifficiliEl.innerHTML = '<p style="font-size:0.9rem; color:#666;">Caricamento dati...</p>';
     try {
         const res = await fetch('/api/geojson/animali_difficili');
         if (!res.ok) throw new Error(`Errore Server: ${res.status}`);
-
         const data = await res.json();
         if (difficiliLayer) mapDifficili.removeLayer(difficiliLayer);
-        difficiliLayer = L.geoJson(data, {
-            style: styleDifficili,
-            onEachFeature: onEachFeatureDifficili
-        }).addTo(mapDifficili);
-        if (data.features && data.features.length > 0) {
-            mapDifficili.fitBounds(difficiliLayer.getBounds());
-        } else {
-            legendDifficiliEl.innerHTML = '<p style="color:orange;">Nessun dato trovato nel file.</p>';
-        }
+        difficiliLayer = L.geoJson(data, { style: styleDifficili, onEachFeature: onEachFeatureDifficili }).addTo(mapDifficili);
+        if (data.features && data.features.length > 0) mapDifficili.fitBounds(difficiliLayer.getBounds());
         buildDifficiliLegend();
     } catch (e) {
         console.error("ERRORE CARICAMENTO:", e);
-        legendDifficiliEl.innerHTML = '<p style="color:red;">Errore caricamento dati.<br>Controlla console (F12).</p>';
     }
 }
 
 function buildDifficiliLegend() {
-    legendDifficiliEl.innerHTML = '<h4 style="margin:0 0 10px 0; font-size:0.9rem; text-transform:uppercase; color:#555;">Giorni di Attesa prima dell\'adozione</h4>';
-    const grades = [0, 15, 30, 45, 60, 90];
-    grades.forEach((grade, i) => {
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.alignItems = 'center';
-        row.style.marginBottom = '5px';
-        const colorBox = document.createElement('span');
-        colorBox.style.background = getDifficiliColor(grade + 1);
-        colorBox.style.width = '18px';
-        colorBox.style.height = '18px';
-        colorBox.style.marginRight = '8px';
-        colorBox.style.border = '1px solid #ccc';
-        const text = document.createElement('span');
-        text.style.fontSize = '0.9rem';
-        text.innerHTML = grade + (grades[i + 1] ? '–' + grades[i + 1] : '+');
-        row.appendChild(colorBox);
-        row.appendChild(text);
-        legendDifficiliEl.appendChild(row);
-    });
+    // Se esiste già una legenda, la rimuoviamo per evitare duplicati
+    if (difficiliLegendControl) {
+        mapDifficili.removeControl(difficiliLegendControl);
+        difficiliLegendControl = null;
+    }
+
+    // Creiamo un controllo Leaflet posizionato in basso a destra
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend legend-difficili-leaf');
+        let content = `
+            <h4>Permanenza nel rifugio pre-adozione</h4>
+            <p>Giorni medi di permanenza in rifugio prima dell'adozione.</p>
+        `;
+        const grades = [0, 15, 30, 45, 60, 90];
+        const labels = [
+            "Molto veloce (<15 gg)",
+            "Veloce (15-30 gg)",
+            "Medio (30-45 gg)",
+            "Lento (45-60 gg)",
+            "Difficile (60-90 gg)",
+            "Critico (>90 gg)"
+        ];
+
+        grades.forEach((grade, i) => {
+            const color = getDifficiliColor(grade + 1);
+            const text = labels[i] ? labels[i] : (grade + '+');
+
+            content += `
+                <div class="legend-row">
+                    <span class="legend-color-box" style="background:${color}"></span>
+                    <span class="legend-label">${text}</span>
+                </div>`;
+        });
+        div.innerHTML = content;
+        L.DomEvent.disableClickPropagation(div);
+        return div;
+    };
+
+    legend.addTo(mapDifficili);
+    difficiliLegendControl = legend;
 }
 
 function destroyDifficiliMap() {
     try {
         if (mapDifficili) {
+            if (difficiliLegendControl) {
+                mapDifficili.removeControl(difficiliLegendControl);
+                difficiliLegendControl = null;
+            }
             if (difficiliLayer) mapDifficili.removeLayer(difficiliLayer);
             mapDifficili.remove();
-            mapDifficili = null;
-            difficiliLayer = null;
+            mapDifficili = null; difficiliLayer = null;
         }
     } catch (e) { console.warn('destroyDifficiliMap error', e); }
 }
 
 // ==========================================
-// 10. EVENT LISTENERS PULSANTI NAVIGAZIONE
+// 10. NAVIGAZIONE
 // ==========================================
-
-// Pulsante Focolai
 if (btnFocolai) btnFocolai.onclick = () => {
     homeView.classList.add('hidden');
     if (randagiContainer) randagiContainer.classList.add('hidden');
     mapSwipeContainer.classList.add('hidden');
     difficiliContainer.classList.add('hidden');
-
-    destroySwipeMap();
-    destroyRandagiMap();
-    destroyDifficiliMap();
-
+    destroySwipeMap(); destroyRandagiMap(); destroyDifficiliMap();
     mapFocolaiContainer.classList.remove('hidden');
-    initFocolaiMap();
-    loadFocolai();
+    initFocolaiMap(); loadFocolai();
 };
 if (btnBack) btnBack.onclick = () => {
-    mapFocolaiContainer.classList.add('hidden');
-    homeView.classList.remove('hidden');
-    destroyFocolaiMap();
+    mapFocolaiContainer.classList.add('hidden'); homeView.classList.remove('hidden'); destroyFocolaiMap();
 };
-// Pulsante Randagi
 if (btnRandagi) btnRandagi.onclick = () => {
-    homeView.classList.add('hidden');
-    mapFocolaiContainer.classList.add('hidden');
-    mapSwipeContainer.classList.add('hidden');
-    difficiliContainer.classList.add('hidden');
-
-    destroySwipeMap();
-    destroyFocolaiMap();
-    destroyDifficiliMap();
-
+    homeView.classList.add('hidden'); mapFocolaiContainer.classList.add('hidden'); mapSwipeContainer.classList.add('hidden'); difficiliContainer.classList.add('hidden');
+    destroySwipeMap(); destroyFocolaiMap(); destroyDifficiliMap();
     randagiContainer.classList.remove('hidden');
     loadRandagiData();
 };
 if (btnRandagiBack) btnRandagiBack.onclick = () => {
-    randagiContainer.classList.add('hidden');
-    homeView.classList.remove('hidden');
-    destroyRandagiMap();
+    randagiContainer.classList.add('hidden'); homeView.classList.remove('hidden'); destroyRandagiMap();
 };
-// Pulsante Swipe Map (PREVALENZA DOMESTICI-SELVATICI)
 if (btnSwipe) btnSwipe.onclick = () => {
-    homeView.classList.add('hidden');
-    mapFocolaiContainer.classList.add('hidden');
-    if (randagiContainer) randagiContainer.classList.add('hidden');
-    difficiliContainer.classList.add('hidden');
-
-    destroyFocolaiMap();
-    destroyRandagiMap();
-    destroyDifficiliMap();
-
+    homeView.classList.add('hidden'); mapFocolaiContainer.classList.add('hidden'); if (randagiContainer) randagiContainer.classList.add('hidden'); difficiliContainer.classList.add('hidden');
+    destroyFocolaiMap(); destroyRandagiMap(); destroyDifficiliMap();
     mapSwipeContainer.classList.remove('hidden');
-    initSwipeMap();
-    loadSwipeMap();
+    initSwipeMap(); loadSwipeMap();
 };
 if (btnSwipeBack) btnSwipeBack.onclick = () => {
-    mapSwipeContainer.classList.add('hidden');
-    homeView.classList.remove('hidden');
-    destroySwipeMap();
+    mapSwipeContainer.classList.add('hidden'); homeView.classList.remove('hidden'); destroySwipeMap();
 };
-// Pulsante Animali Difficili
 if (btnDifficili) btnDifficili.onclick = () => {
-    homeView.classList.add('hidden');
-    mapFocolaiContainer.classList.add('hidden');
-    if (randagiContainer) randagiContainer.classList.add('hidden');
-    mapSwipeContainer.classList.add('hidden');
-
-    destroyFocolaiMap();
-    destroyRandagiMap();
-    destroySwipeMap();
-
+    homeView.classList.add('hidden'); mapFocolaiContainer.classList.add('hidden'); if (randagiContainer) randagiContainer.classList.add('hidden'); mapSwipeContainer.classList.add('hidden');
+    destroyFocolaiMap(); destroyRandagiMap(); destroySwipeMap();
     difficiliContainer.classList.remove('hidden');
-    initDifficiliMap();
-    loadDifficiliData();
+    initDifficiliMap(); loadDifficiliData();
 };
 if (btnDifficiliBack) btnDifficiliBack.onclick = () => {
-    difficiliContainer.classList.add('hidden');
-    homeView.classList.remove('hidden');
-    destroyDifficiliMap();
+    difficiliContainer.classList.add('hidden'); homeView.classList.remove('hidden'); destroyDifficiliMap();
 };
